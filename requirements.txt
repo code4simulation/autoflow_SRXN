@@ -1,0 +1,13 @@
+# Core libraries for atomic/molecular modeling
+ase
+pymatgen
+numpy
+scipy
+matplotlib
+pandas
+tqdm
+# Common for surface reactions and ML potentials
+# (Keeping these commented out by default to avoid huge installs unless needed)
+# torch
+# torch-geometric
+# mace-torch
