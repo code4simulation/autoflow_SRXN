@@ -122,11 +122,30 @@ def reconstruct_2x1_buckled(atoms, bond_length=2.30, buckle=0.7, pattern='checke
     for d in found_dimers:
         r_idx = unique_rows.index(round((d['centroid'][:2] @ inv_cell)[1]*8,1))
         c_idx = unique_cols.index(round((d['centroid'][:2] @ inv_cell)[0]*8,1))
-        S = (-1)**(r_idx + c_idx) if pattern == 'checkerboard' else (-1)**c_idx
+        
+        if pattern == 'checkerboard':
+            S = (-1)**(r_idx + c_idx)
+        elif pattern == 'stripe':
+            S = (-1)**c_idx
+        else:
+            S = 1 # 'uniform' pattern
         
         idx1, idx2 = d['ids']
-        center = (atoms.positions[idx1] + atoms.positions[idx1] + d['dist_vec']) / 2
-        vec = (atoms.positions[idx1] - (atoms.positions[idx1] + d['dist_vec']))
+        # Ensure idx1 is always the one that is 'lower' in coordinate space
+        # to prevent random buckling directions within a pattern.
+        pos1 = atoms.positions[idx1]
+        pos2_eff = pos1 + d['dist_vec']
+        
+        # Sort based on Cartesian coordinates (X then Y) to be extremely robust
+        # This ensures that idx1 is always the "first" atom in a consistent scan direction.
+        if d['dist_vec'][0] < -1e-4 or (abs(d['dist_vec'][0]) < 1e-4 and d['dist_vec'][1] < -1e-4):
+             idx1, idx2 = idx2, idx1
+             curr_dist_vec = -d['dist_vec']
+        else:
+             curr_dist_vec = d['dist_vec']
+
+        center = atoms.positions[idx1] + curr_dist_vec / 2
+        vec = -curr_dist_vec # from idx2 to idx1
         vec /= np.linalg.norm(vec)
         
         d_xy = np.sqrt(bond_length**2 - buckle**2)

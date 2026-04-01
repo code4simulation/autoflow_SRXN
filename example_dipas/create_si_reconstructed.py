@@ -55,4 +55,4 @@ def process_poscar_bulk_to_slab_standard(input_path='POSCAR', output_path='POSCA
     print(f"Pattern Applied: {pattern}")
 
 if __name__ == "__main__":
-    process_poscar_bulk_to_slab_standard(pattern='checkerboard')
+    process_poscar_bulk_to_slab_standard(pattern='uniform')
