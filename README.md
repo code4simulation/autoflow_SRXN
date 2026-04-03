@@ -19,7 +19,14 @@
 - **Si(100) 2x1 Reconstructed**: 버클링(Buckling) 정렬이 포함된 표준 재구성 표면 생성.
 - **산화 및 패시베이션**: Greedy Max-Min 거리 알고리즘을 통한 균일한 산화막(Oxygen Bridge) 및 수소 패시베이션 처리.
 
-### 4. 정밀 자가 진단 (Atomic-Level Diagnostics)
+### 4. Gibbs 자유 에너지 및 열역학 분석 (Thermodynamics)
+- **VDOS 기반 분석**: Phonopy의 진동 상태 밀도(VDOS) 데이터를 파싱하여 $ZPE, S_{vib}(T), G_{vib}(T)$ 산출.
+- **Phase별 모드 분화**: 
+    - **Gas Mode**: Sackur-Tetrode 식과 로테이션 보정, 엔탈피($PV$) 항을 포함한 기체 분자 자유 에너지 계산.
+    - **Adsorbate/Substrate Mode**: 고정된 표면계에 최적화된 조화 고체(Harmonic Solid) 모델 기반 분석.
+- **단위 변환 및 자동화**: $THz, cm^{-1}, eV, kJ/mol$ 간의 자동 변환 및 온도 의존성 리포트 생성.
+
+### 5. 정밀 자가 진단 (Atomic-Level Diagnostics)
 - **`verbose=True` 모드**: 라이브러리 내부에서 리간드 분석 및 스테릭 충돌 현황을 실시간 보고.
 - **원자 수준 로그**: `[Overlap] Si(12) - C(45) clash (dist: 1.15 A)`와 같이 충돌 원자의 인덱스와 거리를 상세히 출력하여 디버깅 용이성 확보.
 
@@ -33,6 +40,8 @@
 
 ### Specialty Modules
 - `example_dipas/si_surface_utils.py`: 실리콘(Si) 표면 특화 재구성 및 산화/수화 유틸리티.
+- `free_energy/thermo_engine.py`: 통계 역학 기반 열역학 보정 엔진.
+- `free_energy/analyze_thermo.py`: Phonopy YAML 결과 파싱 및 자유 에너지 분석 CLI 도구.
 
 ---
 
@@ -50,6 +59,19 @@ python run_dipas_study.py
 2. `H-Passivated`
 3. `Oxidized (50%)`
 4. `Oxidized + H-Passivated`
+
+### 🌡️ 열역학 분석 (Gibbs Free Energy)
+
+Phonopy 계산 결과를 바탕으로 자유 에너지를 산출하려면 `free_energy` 디렉토리에서 다음 명령을 수행하십시오.
+
+```bash
+cd free_energy
+# 기체 분자 분석 예시 (질량 18.015, 대칭수 2)
+python analyze_thermo.py phonopy.yaml --energy -14.5 --mode gas --mass 18.0 --sigma 2
+
+# 흡착 구조 분석 예시
+python analyze_thermo.py phonopy.yaml --energy -500.4 --mode adsorbent
+```
 
 ---
 
