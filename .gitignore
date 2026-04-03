@@ -4,3 +4,15 @@ __pycache__/
 .vscode/
 .idea/
 *.DS_Store
+
+# Data Files (Exclude generated candidates and logs)
+*cands_*.extxyz
+*surface_*.extxyz
+*.log
+*.tmp
+POSCAR_reconstructed
+
+# Whitelist essential input data
+!example_dipas/dipas_3d.extxyz
+!example_dipas/Si.vasp
+!example_dipas/si100_reconstructed_passivated.extxyz
