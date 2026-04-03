@@ -67,12 +67,14 @@ def get_all_dangling_bonds_general(atoms, valence_map, vector_generator, cutoff=
                     all_bonds.append({'parent': idx, 'vector': v, 'type': f'{sym}-H'})
     return all_bonds
 
-def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_generator, cutoff=3.1, side='top'):
+def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_generator, cutoff=3.1, side='top', verbose=False):
     """Uniformly passivate a surface using a greedy max-min distance algorithm."""
     from ase.geometry import get_distances
     
     candidates = get_all_dangling_bonds_general(atoms, valence_map, vector_generator, cutoff, side)
-    if not candidates: return atoms
+    if not candidates: 
+        if verbose: print(f"  [Passivation] No dangling bonds found on {side} surface.")
+        return atoms
     
     n_target = int(round(len(candidates) * h_coverage))
     if n_target == 0: return atoms
@@ -80,6 +82,8 @@ def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_ge
     current_atoms = atoms.copy()
     success = 0
     available = list(candidates)
+    
+    if verbose: print(f"  [Passivation] Targeting {n_target} sites on {side} surface (out of {len(candidates)} available).")
     
     while success < n_target and available:
         h_indices = [i for i, sym in enumerate(current_atoms.symbols) if sym == 'H']
@@ -120,4 +124,5 @@ def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_ge
         else:
             break
             
+    if verbose: print(f"  [Passivation] Successfully placed {success}/{n_target} H atoms on {side} surface.")
     return current_atoms

@@ -23,7 +23,7 @@ def study_dipas_on_multiple_surfaces():
     dipas = read(mol_file)
     
     # 2. Generate the 4 standardized surfaces
-    surfaces = generate_standard_surfaces(bulk_si)
+    surfaces = generate_standard_surfaces(bulk_si, verbose=True)
     
     all_results = []
     
@@ -35,7 +35,7 @@ def study_dipas_on_multiple_surfaces():
         # Save the surface itself for reference
         write(f'surface_{label}.extxyz', slab)
         
-        mgr = AdsorptionWorkflowManager(slab)
+        mgr = AdsorptionWorkflowManager(slab, verbose=True)
         
         # A. Physisorption (All surfaces)
         print(f"  Sampling Physisorption on {label}...")

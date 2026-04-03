@@ -69,8 +69,9 @@ def get_natural_pairing_vector(atoms, idx, neighbor_data=None):
             return diff / mag
     return None
 
-def reconstruct_2x1_buckled(atoms, buckle=0.7, bond_length=2.30):
+def reconstruct_2x1_buckled(atoms, buckle=0.7, bond_length=2.30, verbose=False):
     """Refined Si(100) 2x1 reconstruction with aligned buckling."""
+    if verbose: print("  [Reconstruction] Starting 2x1 buckling alignment...")
     bulk_indices = np.where(atoms.symbols == 'Si')[0]
     z_coords = atoms.positions[bulk_indices, 2]
     z_max = np.max(z_coords)
@@ -128,6 +129,7 @@ def reconstruct_2x1_buckled(atoms, buckle=0.7, bond_length=2.30):
                 
             paired.add(best_idx2)
             
+    if verbose: print(f"  [Reconstruction] Successfully formed and aligned {len(paired)} dimers.")
     # Return list of reconstructed dimer pairs for downstream manager
     dimers, _ = identify_surface_bonds(atoms)
     return dimers
@@ -168,7 +170,7 @@ def identify_surface_bonds(atoms, cutoff=2.6):
     return dimer_bonds, backbonds
 
 
-def oxidize_si_surface(slab, dimer_coverage=0.0, backbond_coverage=0.0):
+def oxidize_si_surface(slab, dimer_coverage=0.0, backbond_coverage=0.0, verbose=False):
     """
     Produce an oxidized Si(100) surface using a Greedy Max-Min Distance algorithm.
     """
@@ -231,11 +233,11 @@ def oxidize_si_surface(slab, dimer_coverage=0.0, backbond_coverage=0.0):
                 break 
         return current_atoms, success
 
-    print(f"Targeting {n_dim_target} dimers and {n_bb_target} backbonds for uniform coverage...")
+    if verbose: print(f"  [Oxidation] Targeting {n_dim_target} dimers and {n_bb_target} backbonds for uniform coverage...")
     oxidized, d_count = get_greedy_best_bond(oxidized, dimers, n_dim_target)
     oxidized, b_count = get_greedy_best_bond(oxidized, backbonds, n_bb_target)
     
-    print(f"Successfully oxidized {d_count} dimers and {b_count} backbonds uniformly.")
+    if verbose: print(f"  [Oxidation] Successfully oxidized {d_count} dimers and {b_count} backbonds uniformly.")
     return oxidized
 
 
@@ -275,7 +277,7 @@ def insert_o_bridge_pure_geo(atoms, idx1, idx2, target_si_o=1.63, target_angle=1
     atoms += Atoms('O', positions=[o_pos])
     return atoms
 
-def passivate_si_surface(atoms, h_coverage=1.0, side='top'):
+def passivate_si_surface(atoms, h_coverage=1.0, side='top', verbose=False):
     """Hybrid H/OH passivation optimized for Si(100) surfaces."""
     from surface_utils import get_all_dangling_bonds_general
     
@@ -301,7 +303,7 @@ def passivate_si_surface(atoms, h_coverage=1.0, side='top'):
         return []
 
     from surface_utils import passivate_surface_coverage_general
-    return passivate_surface_coverage_general(atoms, h_coverage, si_val_map, si_vector_gen, side=side)
+    return passivate_surface_coverage_general(atoms, h_coverage, si_val_map, si_vector_gen, side=side, verbose=verbose)
 
 def build_si100_slab(bulk_atoms, size=(4,4), layers=8, vacuum=10.0):
     """
@@ -326,7 +328,7 @@ def build_si100_slab(bulk_atoms, size=(4,4), layers=8, vacuum=10.0):
             
     return slab
 
-def generate_standard_surfaces(bulk_si):
+def generate_standard_surfaces(bulk_si, verbose=False):
     """
     Generate 4 standard Si(100) surfaces for adsorption study:
     S1: Clean 2x1 Reconstructed
@@ -334,32 +336,33 @@ def generate_standard_surfaces(bulk_si):
     S3: Oxidized 2x1 Reconstructed (50% Dimer/BB coverage)
     S4: Oxidized + H-passivated
     """
-    print("Generating Standard Silicon Surfaces...")
+    if verbose: print("Generating Standard Silicon Surfaces...")
     # Base slab
     base = build_si100_slab(bulk_si, size=(4,4), layers=8)
     
     # S1: Reconstructed
     s1 = base.copy()
-    reconstruct_2x1_buckled(s1)
+    reconstruct_2x1_buckled(s1, verbose=verbose)
     s1.info['label'] = 'S1_Clean_2x1'
     
     # S2: H-passivated
     # We passivate bottom too if needed, but here let's follow user preference
     s2 = s1.copy()
-    s2 = passivate_si_surface(s2, h_coverage=1.0, side='top')
+    s2 = passivate_si_surface(s2, h_coverage=1.0, side='top', verbose=verbose)
     # Bottom passivation for symmetry/stability
-    s2 = passivate_si_surface(s2, h_coverage=1.0, side='bottom')
+    s2 = passivate_si_surface(s2, h_coverage=1.0, side='bottom', verbose=verbose)
     s2.info['label'] = 'S2_H_Passivated'
     
     # S3: Oxidized (Clean)
     s3 = s1.copy()
-    s3 = oxidize_si_surface(s3, dimer_coverage=0.5, backbond_coverage=0.5)
+    s3 = oxidize_si_surface(s3, dimer_coverage=0.5, backbond_coverage=0.5, verbose=verbose)
     s3.info['label'] = 'S3_Oxidized'
     
     # S4: Oxidized + H-passivated
     s4 = s3.copy()
-    s4 = passivate_si_surface(s4, h_coverage=1.0, side='top')
-    s4 = passivate_si_surface(s4, h_coverage=1.0, side='bottom')
+    s4 = passivate_si_surface(s4, h_coverage=1.0, side='top', verbose=verbose)
+    s4 = passivate_si_surface(s4, h_coverage=1.0, side='bottom', verbose=verbose)
+    s4.info['label'] = 'S4_Oxidized_H_Passivated'
     s4.info['label'] = 'S4_Oxidized_H_Passivated'
     
     return [s1, s2, s3, s4]

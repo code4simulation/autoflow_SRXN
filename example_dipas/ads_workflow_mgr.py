@@ -12,12 +12,14 @@ class AdsorptionWorkflowManager:
     """
     Generalized Adsorption Manager with Mechanistic Logging and Visual Clarity.
     """
-    def __init__(self, slab):
+    def __init__(self, slab, verbose=False):
         self.slab = slab
+        self.verbose = verbose
         z_max = slab.positions[:, 2].max()
         all_surface = np.where(slab.positions[:, 2] > z_max - 1.5)[0]
         self.surface_indices = self.get_unique_surface_indices(slab, all_surface)
-        print(f"Surface Symmetry Analysis: {len(all_surface)} atoms reduced to {len(self.surface_indices)} sites.")
+        if self.verbose:
+            print(f"Surface Symmetry Analysis: {len(all_surface)} atoms reduced to {len(self.surface_indices)} sites.")
     
     def _get_rotation_center(self, atoms, mode='com'):
         """Helper to get rotation/placement center."""
@@ -121,29 +123,40 @@ class AdsorptionWorkflowManager:
         slab_with_ads += m_copy
         return slab_with_ads
 
-    def check_overlap(self, atoms, cutoff=1.2, verbose=False):
+    def check_overlap(self, atoms, cutoff=1.2, verbose=None):
+        if verbose is None: verbose = self.verbose
         from ase.geometry import get_distances
         tags = atoms.get_tags()
         substrate, adsorbate = atoms[tags <= 1], atoms[tags >= 2]
         if not len(adsorbate): return False
         
         # 1. Adsorbate vs Substrate
-        _, d_sub = get_distances(adsorbate.positions, substrate.positions, cell=atoms.cell, pbc=atoms.pbc)
-        if np.any(d_sub < cutoff):
-            if verbose: print(f"    [Overlap] Adsorbate-Substrate clash detected ({np.sum(d_sub < cutoff)} pairs)")
+        indices_ads = np.where(tags >= 2)[0]
+        indices_sub = np.where(tags <= 1)[0]
+        D_sub, d_sub = get_distances(adsorbate.positions, substrate.positions, cell=atoms.cell, pbc=atoms.pbc)
+        # d_sub is (n_ads, n_sub)
+        clashes = np.where(d_sub < cutoff)
+        if len(clashes[0]) > 0:
+            if verbose:
+                for i_a, i_s in zip(clashes[0], clashes[1]):
+                    a_idx, s_idx = indices_ads[i_a], indices_sub[i_s]
+                    print(f"    [Overlap] {atoms.symbols[a_idx]}({a_idx}) - {atoms.symbols[s_idx]}({s_idx}) clash (dist: {d_sub[i_a, i_s]:.2f} A)")
             return True
             
         # 2. Adsorbate internal (Core vs Ligand)
         if len(np.unique(tags[tags >= 2])) > 1:
-            # Check overlap between fragments with different tags
-            for t1 in np.unique(tags[tags >= 2]):
-                for t2 in np.unique(tags[tags >= 2]):
-                    if t1 >= t2: continue
-                    p1 = atoms.positions[tags == t1]
-                    p2 = atoms.positions[tags == t2]
-                    _, d_int = get_distances(p1, p2, cell=atoms.cell, pbc=atoms.pbc)
-                    if np.any(d_int < cutoff):
-                        if verbose: print(f"    [Overlap] Fragment-Fragment clash detected ({np.sum(d_int < cutoff)} pairs)")
+            unique_tags = np.sort(np.unique(tags[tags >= 2]))
+            for i_t, t1 in enumerate(unique_tags):
+                for t2 in unique_tags[i_t+1:]:
+                    idx1 = np.where(tags == t1)[0]
+                    idx2 = np.where(tags == t2)[0]
+                    D_int, d_int = get_distances(atoms.positions[idx1], atoms.positions[idx2], cell=atoms.cell, pbc=atoms.pbc)
+                    clashes_int = np.where(d_int < cutoff)
+                    if len(clashes_int[0]) > 0:
+                        if verbose:
+                            for i1, i2 in zip(clashes_int[0], clashes_int[1]):
+                                a1_idx, a2_idx = idx1[i1], idx2[i2]
+                                print(f"    [Overlap] {atoms.symbols[a1_idx]}({a1_idx}) - {atoms.symbols[a2_idx]}({a2_idx}) clash (dist: {d_int[i1, i2]:.2f} A)")
                         return True
         return False
 
@@ -173,9 +186,11 @@ class AdsorptionWorkflowManager:
         
         candidates = []
         z_max = self.slab.positions[:, 2].max()
+        stats = {'total': 0, 'overlap': 0}
         for idx in self.surface_indices:
             site = self.slab.positions[idx]
             for rv in rot_vectors:
+                stats['total'] += 1
                 m_copy = molecule.copy()
                 # Rotate around chosen center
                 c_pos_init = self._get_rotation_center(m_copy, mode=rot_center)
@@ -195,10 +210,16 @@ class AdsorptionWorkflowManager:
                 if not self.check_overlap(slab_copy, cutoff=1.2):
                     slab_copy.info['mechanism'] = f"Physisorption on Site {idx}, center={rot_center}"
                     candidates.append(slab_copy)
+                else:
+                    stats['overlap'] += 1
+        
+        if self.verbose:
+            print(f"Physisorption Search: Generated {len(candidates)} candidates from {stats['total']} attempts ({stats['overlap']} skipped due to overlaps).")
         return candidates
 
 
-    def discover_ligands(self, molecule, center_symbol='Si', skin=0.2):
+    def discover_ligands(self, molecule, center_symbol='Si', skin=0.2, verbose=None):
+        if verbose is None: verbose = self.verbose
         """
         Discover ligands and their hapticity using graph partitioning.
         Includes the bond vector (from center to ligand) for alignment.
@@ -260,6 +281,12 @@ class AdsorptionWorkflowManager:
                 })
 
                 
+        if verbose:
+            print(f"Precursor Fragmentation Analysis ({center_symbol} centered):")
+            print(f"  Found {len(ligands)} ligands attached to index {c_idx}.")
+            for i, l in enumerate(ligands):
+                print(f"  - Ligand {i}: {l['formula']} (hapticity={l['hapticity']}), atoms: {l['indices']}")
+                
         return c_idx, ligands
 
     def _place_at_dangling_bond(self, fragment, binding_idx, internal_bond_vec, target_site_pos, db_vector, bond_length, rot_angle=0):
@@ -295,8 +322,10 @@ class AdsorptionWorkflowManager:
         if not dimers:
             print("Warning: No dimers found on surface. Chemisorption requires site pairs.")
             return []
-        print(f"DEBUG: Found {len(dimers)} dimers for chemisorption.")
+        if self.verbose:
+            print(f"Chemisorption Site Analysis: Found {len(dimers)} dimers/pairs for dissociative adsorption.")
         candidates = []
+        stats = {'attempts': 0, 'overlap': 0, 'deduplicated': 0}
 
 
 
@@ -305,7 +334,9 @@ class AdsorptionWorkflowManager:
         seen_formulas = set()
         for l_info in ligands:
             formula = l_info.get('formula', 'Unknown')
-            if formula in seen_formulas: continue
+            if formula in seen_formulas: 
+                stats['deduplicated'] += 1
+                continue
             seen_formulas.add(formula)
             
             # Fragment B: The leaving ligand
@@ -357,7 +388,12 @@ class AdsorptionWorkflowManager:
                     
                     if best_pose:
                         candidates.append(best_pose)
-                        break 
+                        break
+                    else:
+                        stats['overlap'] += 1
+        
+        if self.verbose:
+            print(f"Chemisorption Search: Generated {len(candidates)} candidates from {stats['attempts']} pathways ({stats['overlap']} blocked by overlap, {stats['deduplicated']} redundant paths skipped).")
         return candidates
 
     def generate_h_exchange_candidates(self, molecule, center_symbol='Si', rot_steps=12):
@@ -376,6 +412,7 @@ class AdsorptionWorkflowManager:
             return []
         
         candidates = []
+        stats = {'attempts': 0, 'overlap': 0, 'deduplicated': 0}
         
         # 2. Iterate each dissociation pathway
         seen_formulas = set()
@@ -444,6 +481,11 @@ class AdsorptionWorkflowManager:
                         combined.info['mechanism'] = f"H-Exchange: {comp_a} on Si_{si_idx}, byproduct {frag_b.symbols[binding_idx_b]}-H"
                         candidates.append(combined)
                         break
+                    else:
+                        stats['overlap'] += 1
+        
+        if self.verbose:
+            print(f"H-Exchange Search: Generated {len(candidates)} candidates from {len(h_mapping)} sites x {len(seen_formulas)} ligands ({stats['overlap']} overlap clashes, {stats['deduplicated']} redundant fragments skipped).")
         return candidates
 
         return candidates
