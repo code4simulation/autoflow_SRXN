@@ -1,150 +1,208 @@
 import numpy as np
 from ase import Atoms
 from ase.neighborlist import neighbor_list
+from ase.geometry import get_distances
 from surface_utils import find_surface_indices
 
 def get_missing_tetrahedral_vectors(atoms, idx, cutoff=2.8, bond_length=2.35, neighbor_data=None):
-
-    """Detect missing tetrahedral bonds for bulk-like Silicon using optional pre-computed neighbors."""
+    """
+    Identify ideal tetrahedral dangling bond vectors for a Silicon atom at index 'idx'.
     
+    This function is fundamental for Si(100) surface studies as it detects the 
+    geometric orientation of missing bonds (dangling bonds) relative to the 
+    remaining neighbors (typically 2 for surface atoms, 3 for subsurface).
+    
+    PBC Handling:
+    Neighbor vectors are extracted from 'neighbor_data' or calculated via 
+    neighbor_list('ijD', ...). The resulting displacement vectors correctly 
+    incorporate the Minimum Image Convention (MIC).
+    """
     if neighbor_data:
         i_list, j_list, D_list = neighbor_data
     else:
-        from ase.neighborlist import neighbor_list
+        # ijD returns (i, j, D) where D is positions[j] - positions[i] (MIC)
         i_list, j_list, D_list = neighbor_list('ijD', atoms, cutoff)
 
-    # Displacement vectors FROM idx TO neighbors
+    # Filter neighbors for ONLY the current atom 'idx'
     idx_mask = (i_list == idx)
     neighbors_D = D_list[idx_mask]
     
     unit_vectors = []
     for d in neighbors_D:
         mag = np.linalg.norm(d)
+        # Avoid self-interaction and check within covalent cutoff
         if 0.1 < mag < cutoff:
             unit_vectors.append(d / mag)
             
     num_neighbors = len(unit_vectors)
     if num_neighbors == 0 or num_neighbors >= 4:
+        # print(f"DEBUG: idx={idx} num_neighbors={num_neighbors}")
         return []
 
-
-
-        
-    # Robust General Approach: The missing vectors should point "away" 
-    # from the average direction of existing neighbors.
+    # Basic tetrahedral symmetry approach: 
+    # The missing vectors should point away from the center of mass of neighbors.
     v_sum = np.sum(unit_vectors, axis=0)
     v_target = -v_sum / (np.linalg.norm(v_sum) if np.linalg.norm(v_sum) > 1e-3 else 1.0)
     
     if num_neighbors == 3:
-        # One missing bond - point exactly opposite to the sum of 3
+        # Single dangling bond pointing exactly away from the triangle of neighbors.
         return [v_target]
 
     if num_neighbors == 2:
-        # Two missing bonds on a Si(100) surface atom (e.g. pristine)
-        w_unit = v_target # Points "up" generally
+        # Typical Si(100) surface atom with 2 dangling bonds.
+        # We find the bisector (v_target) and define an orthogonal axis 'p' 
+        # based on the cross product of the neighbor vectors.
+        w_unit = v_target 
         u = unit_vectors[0] - unit_vectors[1]
-        u_unit = u / np.linalg.norm(u)
+        u_norm = np.linalg.norm(u)
+        if u_norm < 1e-3: return [] # Degenerate neighbors
+        u_unit = u / u_norm
         p_unit = np.cross(w_unit, u_unit)
         p_unit /= np.linalg.norm(p_unit)
         
-        # Ideal tetrahedral angle: mix of bisector and perpendicular
+        # Ideal tetrahedral angles: mix of bisector and perpendicular plane
+        # 0.577 = cos(dimer angle/2), 0.816 = sin(dimer angle/2) approximately
         v3 = w_unit * 0.577 + p_unit * 0.816
         v4 = w_unit * 0.577 - p_unit * 0.816
         return [v3, v4]
 
     if num_neighbors == 1:
-        # Three missing bonds
+        # Highly coordinatively unsaturated (3 missing bonds).
         return [v_target]
 
     return []
 
 def get_natural_pairing_vector(atoms, idx, neighbor_data=None):
-    """Determine the lateral axis where dangling bonds point toward a neighbor for Si(100)."""
+    """
+    Determine the lateral pairing axis for a Si(100) surface atom based on dangling bonds.
+    
+    This vector identifies the preferred direction for forming a 2x1 dimer.
+    NOTE: The result is an UNORIENTED axis. Its sign depends purely on the 
+    neighbor enumeration order. Do NOT use its sign for consistent buckling orientation.
+    """
+    # Ensure neighbor_list is used with proper MIC (handled inside get_missing_tetrahedral_vectors)
     vecs = get_missing_tetrahedral_vectors(atoms, idx, neighbor_data=neighbor_data)
     if len(vecs) == 2:
+        # Surface Si(100) atoms have 2 dangling bonds. 
+        # The dimerization direction is the lateral vector connecting them.
         diff = vecs[0] - vecs[1]
-        diff[2] = 0
+        diff[2] = 0 # Projection onto the surface plane
         mag = np.linalg.norm(diff)
         if mag > 1e-3:
             return diff / mag
     return None
 
-def reconstruct_2x1_buckled(atoms, buckle=0.7, bond_length=2.30, verbose=False):
-    """Refined Si(100) 2x1 reconstruction with aligned buckling."""
-    if verbose: print("  [Reconstruction] Starting 2x1 buckling alignment...")
-    bulk_indices = np.where(atoms.symbols == 'Si')[0]
-    z_coords = atoms.positions[bulk_indices, 2]
-    z_max = np.max(z_coords)
-    surface_indices = bulk_indices[np.abs(z_coords - z_max) < 1.0]
-    i_list, j_list, D_list = neighbor_list('ijD', atoms, 4.2)
-    neighbor_data = (i_list, j_list, D_list)
+def reconstruct_2x1_buckled(atoms, buckle=0.7, bond_length=2.30, pattern='checkerboard', verbose=False):
+    """
+    Vector-Agnostic 2x1 reconstruction (Strictly avoids diamond100 assumptions).
     
-    # Coordination count should use a smaller cutoff to distinguish surface vs bulk
-    i_coord, _, _ = neighbor_list('ijD', atoms, 3.1)
-    counts = np.bincount(i_coord, minlength=len(atoms))
-
-    paired = set()
-    for idx1 in surface_indices:
-        if idx1 in paired or counts[idx1] >= 4: continue
+    Supports 'checkerboard', 'stripe', and 'uniform' buckling patterns.
+    Uses fractional coordinate grid assignment for robust global phase parity.
+    """
+    if verbose: print(f"  [Reconstruction] Starting 2x1 buckling alignment (Pattern: {pattern})...")
+    
+    indices = find_surface_indices(atoms, 'top')
+    if len(indices) == 0: return []
+    
+    paired, found_dimers = set(), []
+    
+    # Use a small cutoff to identify coordination
+    i_list, _ = neighbor_list('ij', atoms, 2.6)
+    
+    for idx1 in indices:
+        if idx1 in paired: continue
+        n_count = np.sum(i_list == idx1)
+        if n_count >= 4: 
+            continue
         
-        pref_vec = get_natural_pairing_vector(atoms, idx1, neighbor_data=neighbor_data)
-        if pref_vec is None: continue
+        pref_vec = get_natural_pairing_vector(atoms, idx1)
+        if pref_vec is None: 
+            continue
         
-        mask = (i_list == idx1)
-        potential_ids = j_list[mask]
-        d_all = np.linalg.norm(D_list[mask], axis=1)
-        D_all = D_list[mask]
-
+        pos1 = atoms.positions[idx1]
+        potential_ids = [i for i in indices if i != idx1 and i not in paired]
+        if not potential_ids: continue
+        
+        # Calculate distances using MIC properly
+        D_all_raw, d_all_raw = get_distances(pos1, atoms.positions[potential_ids], cell=atoms.cell, pbc=atoms.pbc)
+        D_all, d_all = D_all_raw[0], d_all_raw[0]
+        
         best_idx2 = -1
+        best_dist_vec = None
         for sub_id, idx2 in enumerate(potential_ids):
-            if idx2 not in surface_indices or idx2 in paired or counts[idx2] >= 4: continue
             dist = d_all[sub_id]
             if 2.0 < dist < 4.2:
-                dot_prod = abs(np.dot(D_all[sub_id]/dist, pref_vec))
-                if dot_prod > 0.7:
+                dot = abs(np.dot(D_all[sub_id]/dist, pref_vec))
+                if dot > 0.8:
                     best_idx2 = idx2
+                    best_dist_vec = D_all[sub_id]
                     break
         
         if best_idx2 != -1:
-            D12 = D_all[sub_id] # pos2 - pos1 with MIC
-            mid = atoms.positions[idx1] + D12 / 2.0
-            p12 = -D12 # pos1 - pos2
-            p12[2] = 0
-            p12_norm = np.linalg.norm(p12)
-            if p12_norm < 1e-3: continue
-            
-            p12_unit = p12 / p12_norm
-            
-            atoms.positions[idx1] = mid + p12_unit * (bond_length/2.0)
-            atoms.positions[best_idx2] = mid - p12_unit * (bond_length/2.0)
-
-            
-            # Buckling: align based on the pairing axis direction (PBC robust)
-            # Use the displacement vector D12 (pos2 - pos1) with MIC
-            # Decide which axis to use (dominant component of pref_vec)
-            if abs(pref_vec[1]) > abs(pref_vec[0]): # Y-oriented pairing
-                idx2_is_up = (D12[1] > 0)
-            else: # X-oriented pairing
-                idx2_is_up = (D12[0] > 0)
-                
-            if idx2_is_up:
-                atoms.positions[best_idx2][2] = z_max + buckle/2.0
-                atoms.positions[idx1][2] = z_max - buckle/2.0
-            else:
-                atoms.positions[best_idx2][2] = z_max - buckle/2.0
-                atoms.positions[idx1][2] = z_max + buckle/2.0
-                
+            found_dimers.append({'ids': (idx1, best_idx2), 'dist_vec': best_dist_vec})
+            paired.add(idx1)
             paired.add(best_idx2)
-            
-    # Wrap atoms to ensure they are within the unit cell after shifts
+
+    if not found_dimers: 
+        if verbose: print("  [Reconstruction] No dimer pairs identified.")
+        return []
+
+    # --- Phase Assignment using Fractional Grid ---
+    cell_xy = atoms.cell[:2, :2]
+    inv_cell = np.linalg.inv(cell_xy)
+    final_organized = []
+    
+    for d in found_dimers:
+        p1 = atoms.positions[d['ids'][0]]
+        # p2_eff is the image of idx2 relative to idx1
+        p2_eff = p1 + d['dist_vec']
+        d['centroid'] = (p1 + p2_eff) / 2
+        
+    # Build unique grid coordinates in fractional space to assign parity
+    unique_rows = sorted(list(set(round((d['centroid'][:2] @ inv_cell)[1]*8,1) for d in found_dimers)))
+    unique_cols = sorted(list(set(round((d['centroid'][:2] @ inv_cell)[0]*8,1) for d in found_dimers)))
+    
+    for d in found_dimers:
+        r_idx = unique_rows.index(round((d['centroid'][:2] @ inv_cell)[1]*8,1))
+        c_idx = unique_cols.index(round((d['centroid'][:2] @ inv_cell)[0]*8,1))
+        
+        if pattern == 'checkerboard':
+            S = (-1)**(r_idx + c_idx)
+        elif pattern == 'stripe':
+            S = (-1)**c_idx
+        else: # 'uniform'
+            S = 1
+        
+        idx1, idx2 = d['ids']
+        
+        # Sort based on Cartesian coordinates (X then Y) to ensure consistent scan direction
+        # This prevents random buckling orientation within a phase.
+        if d['dist_vec'][0] < -1e-4 or (abs(d['dist_vec'][0]) < 1e-4 and d['dist_vec'][1] < -1e-4):
+             idx1, idx2 = idx2, idx1
+             curr_dist_vec = -d['dist_vec']
+        else:
+             curr_dist_vec = d['dist_vec']
+
+        center = atoms.positions[idx1] + curr_dist_vec / 2
+        vec = -curr_dist_vec # normalized vector from idx2 towards idx1
+        vec_norm = np.linalg.norm(vec)
+        if vec_norm < 1e-3: continue
+        vec /= vec_norm
+        
+        # D_xy projection to ensure bond_length is preserved when buckling
+        d_xy = np.sqrt(max(0, bond_length**2 - buckle**2))
+        
+        # Set final positions: Add S * buckle/2 to Z for the 'lower' atom (idx1)
+        # Result: idx1 is shifted towards mid + Z-offset, idx2 shifted opposite
+        atoms.positions[idx1] = center + vec * (d_xy / 2) + np.array([0, 0, S * buckle / 2])
+        atoms.positions[idx2] = center - vec * (d_xy / 2) - np.array([0, 0, S * buckle / 2])
+        final_organized.append((idx1, idx2, d['dist_vec'], S))
+        
+    # Wrap atoms back to unit cell
     atoms.wrap()
     
-    if verbose: print(f"  [Reconstruction] Successfully formed and aligned {len(paired)} dimers.")
-    # Return list of reconstructed dimer pairs for downstream manager
-    dimers, _ = identify_surface_bonds(atoms)
-    return dimers
-
-
+    if verbose: print(f"  [Reconstruction] Success: Applied {pattern} phase to {len(found_dimers)} dimers.")
+    return final_organized
 
 
 def identify_surface_bonds(atoms, cutoff=2.6):
