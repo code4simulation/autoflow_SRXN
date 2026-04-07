@@ -28,18 +28,18 @@ def analyze_surface_reactivity(surface, verbose=True):
     return results
 
 
-def analyze_molecule_ligands(molecule, center_symbol='Si', verbose=True):
+def analyze_molecule_ligands(molecule, center_target='Si', verbose=True):
     """
     Algorithmically fragments the precursor molecule to identify reactive ligands.
     Uses AdsorptionWorkflowManager implicitly for the heavy lifting.
     """
     # Create a temporary manager to use its fragmentation logic
     mgr = AdsorptionWorkflowManager(molecule, verbose=verbose)
-    c_idx, ligands = mgr.discover_ligands(molecule, center_symbol=center_symbol, verbose=verbose)
+    c_idx, ligands = mgr.discover_ligands(molecule, center_target=center_target, verbose=verbose)
     return c_idx, ligands
 
 
-def build_chemisorption_structures(molecule, center_symbol, surface, rot_steps=8, verbose=True):
+def build_chemisorption_structures(molecule, center_target='Si', surface=None, rot_steps=8, verbose=True):
     """
     Entry point for algorithmic chemisorption generation based on input molecule and surface.
     Identifies valid mechanisms based on available surface sites.
@@ -48,7 +48,7 @@ def build_chemisorption_structures(molecule, center_symbol, surface, rot_steps=8
         print("\n--- Starting Algorithmic Chemisorption Routing ---")
         
     sites = analyze_surface_reactivity(surface, verbose=verbose)
-    c_idx, ligands = analyze_molecule_ligands(molecule, center_symbol=center_symbol, verbose=verbose)
+    c_idx, ligands = analyze_molecule_ligands(molecule, center_target=center_target, verbose=verbose)
     
     candidates = []
     

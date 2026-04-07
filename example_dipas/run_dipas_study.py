@@ -51,7 +51,7 @@ def study_dipas_on_multiple_surfaces():
 
         # B. Reactive Adsorption (Algorithmic Routing)
         print(f"  Sampling Chemisorption / H-Exchange on {label}...")
-        reactive_cands = build_chemisorption_structures(dipas, center_symbol='Si', surface=slab, rot_steps=8, verbose=True)
+        reactive_cands = build_chemisorption_structures(dipas, center_target='Si', surface=slab, rot_steps=8, verbose=True)
         print(f"    -> Generated {len(reactive_cands)} reactive candidates.")
         
         # Separate indexing so we maintain sequence numbers per reaction type
