@@ -34,7 +34,6 @@ class AdsorptionWorkflowManager:
         else:
             return np.array([0.0, 0.0, 0.0])
 
-
     def get_unique_surface_indices(self, slab, indices):
         lattice, positions, numbers = slab.get_cell(), slab.get_scaled_positions(), slab.get_atomic_numbers()
         try:
@@ -51,7 +50,6 @@ class AdsorptionWorkflowManager:
             return centered_indices
         except Exception:
             return self.get_unique_geometric_sites(slab, indices)
-
 
     def get_unique_geometric_sites(self, slab, indices, precision=1):
         # Use fractional coordinates for hashing to be lattice-agnostic
@@ -73,9 +71,6 @@ class AdsorptionWorkflowManager:
             centered_representatives.append(members[np.argmin(dists)])
         return centered_representatives
 
-
-
-
     def get_all_adjacent_sites(self, slab, core_idx, k, max_dist=4.5):
         from ase.geometry import get_distances
         _, d_list = get_distances(slab.positions[core_idx], slab.positions, cell=slab.cell, pbc=slab.pbc)
@@ -95,7 +90,6 @@ class AdsorptionWorkflowManager:
             temp_smiles = re.sub(r'SiH(\d+)', r'[SiH\1]', smiles)
             temp_smiles = re.sub(r'Si(?!H|\[)', r'[Si]', temp_smiles)
             mol = Chem.MolFromSmiles(temp_smiles)
-            
         if mol is None: return None
         mol = Chem.AddHs(mol)
         try:
@@ -104,11 +98,8 @@ class AdsorptionWorkflowManager:
         except:
             # Fallback if optimization fail (molecule might be too small or complex)
             pass
-            
         conf = mol.GetConformer()
         return Atoms([a.GetSymbol() for a in mol.GetAtoms()], positions=conf.GetPositions())
-
-
 
     def align_and_place(self, slab, molecule, reactive_indices, target_positions):
         m_copy = molecule.copy()
@@ -160,7 +151,6 @@ class AdsorptionWorkflowManager:
                         return True
         return False
 
-
     def generate_physisorption_candidates(self, molecule, height=3.5, n_rot=16, rot_center='com'):
         from itertools import product
         phi = np.pi * (3.0 - np.sqrt(5.0))
@@ -169,7 +159,6 @@ class AdsorptionWorkflowManager:
         
         # Determine center for rotation/sampling
         initial_center = self._get_rotation_center(molecule, mode=rot_center)
-        
         for i in range(n_rot):
             if n_rot > 1:
                 y = 1 - (i / float(n_rot - 1)) * 2
@@ -182,7 +171,6 @@ class AdsorptionWorkflowManager:
             # Simple check to avoid duplicated vectors
             if not any(np.allclose(vec, rv, atol=0.01) for rv in rot_vectors):
                 rot_vectors.append(vec)
-
         
         candidates = []
         z_max = self.slab.positions[:, 2].max()
@@ -212,11 +200,9 @@ class AdsorptionWorkflowManager:
                     candidates.append(slab_copy)
                 else:
                     stats['overlap'] += 1
-        
         if self.verbose:
             print(f"Physisorption Search: Generated {len(candidates)} candidates from {stats['total']} attempts ({stats['overlap']} skipped due to overlaps).")
         return candidates
-
 
     def discover_ligands(self, molecule, center_target='Si', skin=0.2, verbose=None):
         if verbose is None: verbose = self.verbose
@@ -284,13 +270,11 @@ class AdsorptionWorkflowManager:
                     'bond_vec': bond_vec # Vector from center to ligand
                 })
 
-                
         if verbose:
             print(f"Precursor Fragmentation Analysis ({center_target} centered):")
             print(f"  Found {len(ligands)} ligands attached to index {c_idx}.")
             for i, l in enumerate(ligands):
                 print(f"  - Ligand {i}: {l['formula']} (hapticity={l['hapticity']}), atoms: {l['indices']}")
-                
         return c_idx, ligands
 
     def _place_at_dangling_bond(self, fragment, binding_idx, internal_bond_vec, target_site_pos, db_vector, bond_length, rot_angle=0):
@@ -307,8 +291,6 @@ class AdsorptionWorkflowManager:
         f.translate(placement_pos - f.positions[binding_idx])
         return f
 
-
-
     def _form_byproduct(self, fragment, binding_idx, internal_bond_vec):
         """Helper to create a byproduct molecule (Ligand + H)."""
         from ase import Atoms
@@ -319,7 +301,3 @@ class AdsorptionWorkflowManager:
         h_pos = f.positions[binding_idx] + (internal_bond_vec / np.linalg.norm(internal_bond_vec)) * b_len
         f += Atoms('H', positions=[h_pos])
         return f
-
-
-
-
