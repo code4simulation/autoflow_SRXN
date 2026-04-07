@@ -1,0 +1,17 @@
+paths:
+  substrate: "../structures/SiO2_substrate.vasp"
+  molecule: "../structures/mol.vasp"
+  output_prefix: "cands_sio2"
+
+settings:
+  center_target: "Ni"
+  rot_steps: 8
+  symprec: 0.2
+  do_physisorption: true
+  do_chemisorption: true
+  max_pair_dist: 5.0
+
+ideal_coordination:
+  Si: 4
+  O: 2
+  Ni: 4

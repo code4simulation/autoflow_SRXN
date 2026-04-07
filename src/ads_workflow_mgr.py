@@ -12,14 +12,15 @@ class AdsorptionWorkflowManager:
     """
     Generalized Adsorption Manager with Mechanistic Logging and Visual Clarity.
     """
-    def __init__(self, slab, verbose=False):
+    def __init__(self, slab, symprec=0.2, verbose=False):
         self.slab = slab
         self.verbose = verbose
+        self.symprec = symprec
         z_max = slab.positions[:, 2].max()
         all_surface = np.where(slab.positions[:, 2] > z_max - 1.5)[0]
-        self.surface_indices = self.get_unique_surface_indices(slab, all_surface)
+        self.surface_indices = self.get_unique_surface_indices(slab, all_surface, symprec=self.symprec)
         if self.verbose:
-            print(f"Surface Symmetry Analysis: {len(all_surface)} atoms reduced to {len(self.surface_indices)} sites.")
+            print(f"Surface Symmetry Analysis (symprec={self.symprec}): {len(all_surface)} atoms reduced to {len(self.surface_indices)} sites.")
     
     def _get_rotation_center(self, atoms, mode='com'):
         """Helper to get rotation/placement center."""
@@ -34,41 +35,66 @@ class AdsorptionWorkflowManager:
         else:
             return np.array([0.0, 0.0, 0.0])
 
-    def get_unique_surface_indices(self, slab, indices):
+    def get_unique_surface_indices(self, slab, indices, symprec=0.2):
         lattice, positions, numbers = slab.get_cell(), slab.get_scaled_positions(), slab.get_atomic_numbers()
-        try:
-            dataset = spglib.get_symmetry_dataset((lattice, positions, numbers), symprec=0.05)
-            equiv = dataset['equivalent_atoms']
-            # Find the representative atom for each symmetry class that is closest to (0.5, 0.5) in fractional coords
-            unique_classes = np.unique(equiv[indices])
-            centered_indices = []
-            for c in unique_classes:
-                class_members = [i for i in indices if equiv[i] == c]
-                dist_sq = np.sum((positions[class_members][:, :2] - 0.5)**2, axis=1)
-                best_idx = class_members[np.argmin(dist_sq)]
-                centered_indices.append(best_idx)
-            return centered_indices
-        except Exception:
-            return self.get_unique_geometric_sites(slab, indices)
-
-    def get_unique_geometric_sites(self, slab, indices, precision=1):
-        # Use fractional coordinates for hashing to be lattice-agnostic
-        scaled_pos = slab.get_scaled_positions()
-        groups = {}
-        for idx in indices:
-            # Hash based on rounded Z height and fractional XY coordinates
-            s_pos = scaled_pos[idx]
-            z_pos = slab.positions[idx, 2]
-            # Use precision for rounding (precision=1 means 0.1 A or 0.01 fractional)
-            h = (round(z_pos, precision), round(s_pos[0] % 1.0, precision + 1), round(s_pos[1] % 1.0, precision + 1))
-            if h not in groups: groups[h] = []
-            groups[h].append(idx)
         
-        # Pick the one closest to the center for each hash group (using fractional coordinates)
+        # We first try the user-provided symprec. If it fails to reduce anything AND it's low, we try to increment it up to 0.5 to force reduction.
+        # But generally we respect the user's symprec if it works.
+        try_precisions = [symprec]
+        if symprec < 0.5:
+            try_precisions += [0.5]
+            
+        for prec in try_precisions:
+            try:
+                dataset = spglib.get_symmetry_dataset((lattice, positions, numbers), symprec=prec)
+                if dataset is None: continue
+                
+                # Handling SPGlib >= 2.0 where dataset is an object
+                if hasattr(dataset, 'equivalent_atoms'):
+                    equiv = dataset.equivalent_atoms
+                else:
+                    # Fallback for older dict interface
+                    equiv = dataset['equivalent_atoms']
+                    
+                unique_classes = np.unique(equiv[indices])
+                
+                if len(unique_classes) < len(indices) or prec == try_precisions[-1]:
+                    centered_indices = []
+                    for c in unique_classes:
+                        class_members = [i for i in indices if equiv[i] == c]
+                        dist_sq = np.sum((positions[class_members][:, :2] - 0.5)**2, axis=1)
+                        best_idx = class_members[np.argmin(dist_sq)]
+                        centered_indices.append(best_idx)
+                    
+                    if len(centered_indices) == len(indices):
+                        return self.get_unique_geometric_sites(slab, indices)    
+                    return centered_indices
+            except Exception:
+                pass
+        return self.get_unique_geometric_sites(slab, indices)
+
+    def get_unique_geometric_sites(self, slab, indices, cutoff=1.5):
+        # Distance-based agglomeration clustering fallback
+        if not len(indices): return []
+        from scipy.spatial.distance import pdist, squareform
+        from scipy.cluster.hierarchy import fcluster, linkage
+        
+        pos = slab.positions[indices]
+        if len(pos) == 1:
+            return indices
+            
+        dist_matrix = pdist(pos)
+        Z = linkage(dist_matrix, method='complete')
+        labels = fcluster(Z, t=cutoff, criterion='distance')
+        
         centered_representatives = []
-        for members in groups.values():
-            dists = np.linalg.norm(scaled_pos[members][:, :2] - 0.5, axis=1)
-            centered_representatives.append(members[np.argmin(dists)])
+        scaled_pos = slab.get_scaled_positions()[indices]
+        for c in np.unique(labels):
+            members_idx = np.where(labels == c)[0]
+            # Pick the one closest to fractional center (0.5, 0.5) to avoid edge artifacts
+            dists = np.linalg.norm(scaled_pos[members_idx][:, :2] - 0.5, axis=1)
+            centered_representatives.append(indices[members_idx[np.argmin(dists)]])
+            
         return centered_representatives
 
     def get_all_adjacent_sites(self, slab, core_idx, k, max_dist=4.5):
