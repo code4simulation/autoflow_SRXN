@@ -7,8 +7,8 @@ settings:
   center_target: "Ni"
   rot_steps: 8
   symprec: 0.2
-  do_physisorption: true
-  do_chemisorption: true
+  do_physisorption: false
+  do_chemisorption: false
   max_pair_dist: 5.0
 
 ideal_coordination:
@@ -21,4 +21,3 @@ passivation:
   element: "H"      # options: "H", "F", "Cl", etc.
   side: "top"       # options: "top", "bottom", "both"
   coverage: 1.0
-  output_name: "passivated_surface.vasp"

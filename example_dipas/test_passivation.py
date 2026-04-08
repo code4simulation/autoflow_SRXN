@@ -36,26 +36,19 @@ def run_generic_adsorption_study(config_path='config.yaml'):
     pass_cfg = config.get('passivation', {})
     if pass_cfg.get('enabled', False):
         from surface_utils import passivate_surface_coverage_general
-        from ase.io import write
         
         element = pass_cfg.get('element', 'H')
         side = pass_cfg.get('side', 'bottom')
         coverage = pass_cfg.get('coverage', 1.0)
-        output_name = pass_cfg.get('output_name', 'passivated.vasp')
         
         sides_to_passivate = [side] if side != 'both' else ['top', 'bottom']
         valence_map = config.get('ideal_coordination', {})
         
         print(f"\n[0] Applying Surface Passivation (Element: {element}, Side: {side}, Coverage: {coverage})...")
-        print("    [Info] Using Generalized VSEPR Engine.")
-        
         for s in sides_to_passivate:
-            # Utilizing the improved generic logic (no longer requiring Si-specific scripts)
+            # Utilize the unified generic engine
             slab = passivate_surface_coverage_general(slab, h_coverage=coverage, valence_map=valence_map, 
                                                      element=element, side=s, verbose=True)
-        
-        print(f"    [Output] Saving passivated structure to: {output_name}")
-        write(output_name, slab)
 
     settings = config.get('settings', {})
     center_target = settings.get('center_target', 'Si')
@@ -101,4 +94,4 @@ def run_generic_adsorption_study(config_path='config.yaml'):
     print(f"\n--- Study Complete. Total candidates: {len(all_results)} ---")
 
 if __name__ == '__main__':
-    run_generic_adsorption_study('config.yaml')
+    run_generic_adsorption_study('config_pass.yaml')

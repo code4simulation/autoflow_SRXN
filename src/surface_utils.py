@@ -25,11 +25,84 @@ def check_overlap(atoms, cutoff=1.2, verbose=False):
         return True
     return False
 
-def get_all_dangling_bonds_general(atoms, valence_map, vector_generator, cutoff=3.1, side='top'):
+def generate_vsepr_vectors(atoms, idx, neighbor_data=None, num_missing=1, cutoff=2.6):
+    """
+    Calculate generic dangling bond vectors using VSEPR approximation.
+    Distributes num_missing vectors symmetrically around the inverse sum of neighbors.
+    """
+    from ase.neighborlist import neighbor_list
+    if neighbor_data:
+        i_list, j_list, D_list = neighbor_data
+    else:
+        i_list, j_list, D_list = neighbor_list('ijD', atoms, cutoff)
+    
+    mask = (i_list == idx)
+    vectors = D_list[mask]
+    
+    # Filter to only covalent neighbors
+    dists = np.linalg.norm(vectors, axis=1)
+    vectors = vectors[(dists > 0.1) & (dists < cutoff)]
+    
+    if len(vectors) == 0:
+        # Fallback: point along Z-axis if no neighbors found
+        return [np.array([0., 0., 1.])] * num_missing
+        
+    # Normalize neighbor vectors
+    norm_vecs = vectors / np.linalg.norm(vectors, axis=1)[:, np.newaxis]
+    sum_vec = np.sum(norm_vecs, axis=0)
+    
+    # Primary direction: away from the geometric center of existing neighbors
+    v_target = -sum_vec
+    if np.linalg.norm(v_target) < 1e-4:
+        v_target = np.array([0., 0., 1.])
+    v_target /= np.linalg.norm(v_target)
+
+    if num_missing == 1:
+        return [v_target]
+
+    if num_missing == 2 and len(vectors) == 2:
+        # Optimized for Tetrahedral/Square-planar geometries (AX2E2)
+        # Mirrors the logic for Si(100) surface dimers
+        w_unit = v_target
+        u = norm_vecs[0] - norm_vecs[1]
+        u_norm = np.linalg.norm(u)
+        if u_norm > 1e-4:
+            u_unit = u / u_norm
+            p_unit = np.cross(w_unit, u_unit)
+            p_unit /= np.linalg.norm(p_unit)
+            
+            # tetrahedral coefficients (cos(54.7), sin(54.7))
+            v1 = w_unit * 0.577 + p_unit * 0.816
+            v2 = w_unit * 0.577 - p_unit * 0.816
+            return [v1, v2]
+
+    # General fallback for num_missing > 1: Conical distribution
+    results = []
+    # Small cone spread for multiple dangling bonds
+    theta = np.deg2rad(20.0) 
+    
+    # Find perpendicular axes
+    perp_vec = np.array([1., 0., 0.])
+    if abs(np.dot(v_target, perp_vec)) > 0.9:
+        perp_vec = np.array([0., 1., 0.])
+    
+    axis_1 = np.cross(v_target, perp_vec)
+    axis_1 /= np.linalg.norm(axis_1)
+    axis_2 = np.cross(v_target, axis_1)
+    
+    for i in range(num_missing):
+        phi = 2 * np.pi * i / num_missing
+        v = v_target * np.cos(theta) + (axis_1 * np.cos(phi) + axis_2 * np.sin(phi)) * np.sin(theta)
+        results.append(v / np.linalg.norm(v))
+        
+    return results
+
+def get_all_dangling_bonds_general(atoms, valence_map, vector_generator=None, cutoff=3.1, side='top'):
     """
     Identify missing valences for surface atoms using platform-independent logic.
-    valence_map: function(symbol) -> int (target coordination)
-    vector_generator: function(atoms, idx, neighbor_data) -> list of vectors
+    valence_map: dict {sym: int} or function(symbol) -> int
+    vector_generator: function(atoms, idx, neighbor_data, num_missing) -> list of vectors.
+                      If None, generate_vsepr_vectors is used.
     """
     from ase.neighborlist import neighbor_list
     surface_indices = find_surface_indices(atoms, side=side, threshold=2.0)
@@ -38,38 +111,40 @@ def get_all_dangling_bonds_general(atoms, valence_map, vector_generator, cutoff=
     i_list, j_list, D_list = neighbor_list('ijD', atoms, cutoff)
     neighbor_data = (i_list, j_list, D_list)
     
+    if vector_generator is None:
+        vector_generator = generate_vsepr_vectors
+        
     all_bonds = []
     for idx in surface_indices:
         sym = atoms.symbols[idx]
-        target_val = valence_map(sym)
+        target_val = valence_map(sym) if callable(valence_map) else valence_map.get(sym, 0)
         if target_val <= 0: continue
 
         mask = (i_list == idx)
         dists = np.linalg.norm(D_list[mask], axis=1)
-        # Count only true covalent neighbors (Si-Si is ~2.35, Si-O is ~1.63)
-        # Using 2.6A as a safe covalent limit
+        # Count only true covalent neighbors
         num_n = np.sum((dists > 0.1) & (dists < 2.6))
+        num_missing = target_val - num_n
         
-        if num_n < target_val:
-
-
-
-
-
-
-
-
-
-            vecs = vector_generator(atoms, idx, neighbor_data)
+        if num_missing > 0:
+            # Pass num_missing to the generator
+            try:
+                vecs = vector_generator(atoms, idx, neighbor_data=neighbor_data, num_missing=num_missing)
+            except TypeError:
+                # Fallback for generators that don't take num_missing yet
+                vecs = vector_generator(atoms, idx, neighbor_data=neighbor_data)
+                
             for v in vecs:
                 # Basic directional filter: point into vacuum
                 if (side == 'top' and v[2] > -0.1) or (side == 'bottom' and v[2] < 0.1):
-                    all_bonds.append({'parent': idx, 'vector': v, 'type': f'{sym}-H'})
+                    all_bonds.append({'parent': idx, 'vector': v, 'parent_sym': sym})
     return all_bonds
 
-def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_generator, cutoff=3.1, side='top', verbose=False):
+def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_generator=None, 
+                                       element='H', cutoff=3.1, side='top', verbose=False):
     """Uniformly passivate a surface using a greedy max-min distance algorithm."""
     from ase.geometry import get_distances
+    from ase.data import covalent_radii
     
     candidates = get_all_dangling_bonds_general(atoms, valence_map, vector_generator, cutoff, side)
     if not candidates: 
@@ -83,11 +158,14 @@ def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_ge
     success = 0
     available = list(candidates)
     
-    if verbose: print(f"  [Passivation] Targeting {n_target} sites on {side} surface (out of {len(candidates)} available).")
+    r_pass = covalent_radii[Atoms(element).numbers[0]]
+    
+    if verbose: print(f"  [Passivation] Targeting {n_target} {element} sites on {side} surface.")
     
     while success < n_target and available:
-        h_indices = [i for i, sym in enumerate(current_atoms.symbols) if sym == 'H']
-        ref_indices = h_indices + [i for i, sym in enumerate(current_atoms.symbols) if sym == 'O']
+        pass_indices = [i for i, sym in enumerate(current_atoms.symbols) if sym == element]
+        # Reference positions to maximize distance from (existing passivation + oxygens for steric)
+        ref_indices = pass_indices + [i for i, sym in enumerate(current_atoms.symbols) if sym == 'O']
         ref_pos = current_atoms.positions[ref_indices] if ref_indices else []
         
         best_cand_idx = -1
@@ -95,7 +173,9 @@ def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_ge
         
         for i_c, cand in enumerate(available):
             parent_pos = current_atoms.positions[cand['parent']]
-            b_len = 1.0 # default H-bond length, could be refined by species
+            r_parent = covalent_radii[atoms.numbers[cand['parent']]]
+            b_len = r_parent + r_pass
+            
             h_pos_candidate = parent_pos + cand['vector'] * b_len
             
             if len(ref_pos) == 0:
@@ -105,15 +185,14 @@ def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_ge
                 score = np.min(dists)
             
             if score > best_score:
-                # Overlap check using MIC (Periodic Boundary Conditions)
-                # Ensure the new H atom isn't too close to ANY existing atom
+                # Overlap check
                 _, all_dists_list = get_distances(h_pos_candidate, current_atoms.positions, 
                                                  cell=current_atoms.cell, pbc=current_atoms.pbc)
                 all_dists = all_dists_list[0]
                 
-                # Exclude the parent atom from the overlap check
                 mask = np.ones(len(all_dists), dtype=bool)
                 mask[cand['parent']] = False
+                # Use a combined radius for overlap threshold
                 if np.any(all_dists[mask] < 0.8): continue
                 
                 best_score = score
@@ -121,15 +200,19 @@ def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_ge
         
         if best_cand_idx != -1:
             cand = available.pop(best_cand_idx)
-            # Refine bond length based on type if needed
-            b_len = 1.48 if 'Si' in cand['type'] else 0.96 if 'O' in cand['type'] else 1.05
+            r_parent = covalent_radii[atoms.numbers[cand['parent']]]
+            b_len = r_parent + r_pass
+            
+            # Empirical refinements if needed (e.g. Si-H, O-H)
+            if cand['parent_sym'] == 'Si' and element == 'H': b_len = 1.48
+            if cand['parent_sym'] == 'O' and element == 'H': b_len = 0.96
+            
             h_pos = current_atoms.positions[cand['parent']] + cand['vector'] * b_len
-            current_atoms += Atoms('H', positions=[h_pos])
-            # Ensure the newly added H atom is wrapped correctly within the cell
+            current_atoms += Atoms(element, positions=[h_pos])
             current_atoms.wrap()
             success += 1
         else:
             break
             
-    if verbose: print(f"  [Passivation] Successfully placed {success}/{n_target} H atoms on {side} surface.")
+    if verbose: print(f"  [Passivation] Successfully placed {success}/{n_target} {element} atoms on {side} surface.")
     return current_atoms

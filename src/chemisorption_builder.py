@@ -17,7 +17,9 @@ def analyze_surface_reactivity(surface, config, verbose=True):
     max_pair_dist = config.get('settings', {}).get('max_pair_dist', 5.0)
     
     # Identify Dangling Bonds (Undercoordinated sites)
-    i_list, j_list, d_list = neighbor_list('ijd', surface, cutoff=1.2) # multiplier cutoff
+    # Using ijD to get displacement vectors for VSEPR
+    i_list, j_list, D_list = neighbor_list('ijD', surface, cutoff=3.0) 
+    d_list = np.linalg.norm(D_list, axis=1)
     
     dangling_sites = []
     
@@ -34,25 +36,18 @@ def analyze_surface_reactivity(surface, config, verbose=True):
         neighbors = []
         for n_i, n_j, dist in zip(i_list, j_list, d_list):
             if n_i == idx:
-                cutoff = covalent_radii[surface.numbers[n_i]] + covalent_radii[surface.numbers[n_j]] + 0.3
-                if dist < cutoff:
+                cutoff_val = covalent_radii[surface.numbers[n_i]] + covalent_radii[surface.numbers[n_j]] + 0.3
+                if dist < cutoff_val and dist > 0.1:
                     neighbors.append(n_j)
                     
         actual_coord = len(neighbors)
         expected = ideal_coord[sym]
         
         if actual_coord < expected:
-            # Calculate dangling vector using VSEPR approximation (reverse sum of neighbor vectors)
-            if actual_coord == 0:
-                db_vec = np.array([0., 0., 1.])
-            else:
-                neighbor_vecs = surface.positions[neighbors] - surface.positions[idx]
-                neighbor_vecs /= np.linalg.norm(neighbor_vecs, axis=1)[:, np.newaxis]
-                sum_vec = np.sum(neighbor_vecs, axis=0)
-                db_vec = -sum_vec
-                if np.linalg.norm(db_vec) < 1e-4:
-                    db_vec = np.array([0., 0., 1.])
-                db_vec /= np.linalg.norm(db_vec)
+            from surface_utils import generate_vsepr_vectors
+            # Calculate dangling vectors using centralized utility
+            vecs = generate_vsepr_vectors(surface, idx, neighbor_data=(i_list, j_list, D_list))
+            db_vec = vecs[0]
                 
             dangling_sites.append({
                 'index': idx,
