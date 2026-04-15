@@ -177,8 +177,9 @@ class AdsorptionWorkflowManager:
                         return True
         return False
 
-    def generate_physisorption_candidates(self, molecule, height=3.5, n_rot=16, rot_center='com'):
+    def generate_physisorption_candidates(self, molecule, height=3.5, n_rot=16, rot_center='com', config=None):
         from itertools import product
+        from surface_utils import identify_protectors, CavityDetector
         phi = np.pi * (3.0 - np.sqrt(5.0))
         # Unique rotations
         rot_vectors, sampled_coords = [], []
@@ -199,10 +200,21 @@ class AdsorptionWorkflowManager:
                 rot_vectors.append(vec)
         
         candidates = []
-        z_max = self.slab.positions[:, 2].max()
         stats = {'total': 0, 'overlap': 0}
-        for idx in self.surface_indices:
-            site = self.slab.positions[idx]
+        
+        target_centers = []
+        if config and config.get('protector', {}).get('enabled', False):
+            sub_idx, prot_idx = identify_protectors(self.slab, config, verbose=self.verbose)
+            grid_res = config.get('protector', {}).get('grid_resolution', 0.2)
+            detector = CavityDetector(self.slab, sub_idx, prot_idx, grid_res=grid_res, verbose=self.verbose)
+            target_centers = detector.find_void_centers(top_clearance=height)
+        else:
+            z_max = self.slab.positions[:, 2].max()
+            for idx in self.surface_indices:
+                site = self.slab.positions[idx]
+                target_centers.append(np.array([site[0], site[1], z_max + height]))
+                
+        for target_pos in target_centers:
             for rv in rot_vectors:
                 stats['total'] += 1
                 m_copy = molecule.copy()
@@ -213,16 +225,15 @@ class AdsorptionWorkflowManager:
                 # Tag adsorbate for overlap detection
                 for a in m_copy: a.tag = 2
                 
-                # Manual placement: place chosen center at site + height
+                # Manual placement: place chosen center at target_pos
                 c_pos_rotated = self._get_rotation_center(m_copy, mode=rot_center)
-                target_pos = np.array([site[0], site[1], z_max + height])
                 m_copy.translate(target_pos - c_pos_rotated)
                 
                 slab_copy = self.slab.copy()
                 slab_copy += m_copy # Manual addition instead of add_adsorbate
                 
                 if not self.check_overlap(slab_copy, cutoff=1.2):
-                    slab_copy.info['mechanism'] = f"Physisorption on Site {idx}, center={rot_center}"
+                    slab_copy.info['mechanism'] = f"Physisorption in void, center={rot_center}"
                     candidates.append(slab_copy)
                 else:
                     stats['overlap'] += 1

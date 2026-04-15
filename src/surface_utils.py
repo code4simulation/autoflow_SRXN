@@ -216,3 +216,152 @@ def passivate_surface_coverage_general(atoms, h_coverage, valence_map, vector_ge
             
     if verbose: print(f"  [Passivation] Successfully placed {success}/{n_target} {element} atoms on {side} surface.")
     return current_atoms
+
+def identify_protectors(atoms, config, verbose=False):
+    """
+    Infers which atoms belong to the protector layer vs the base substrate.
+    Based on Z-height and molecular connectivity.
+    """
+    import numpy as np
+    protector_cfg = config.get('protector', {})
+    if not protector_cfg.get('enabled', False):
+        return np.arange(len(atoms)), np.array([], dtype=int)
+        
+    heuristic = protector_cfg.get('heuristic', 'graph')
+    
+    if heuristic == 'tag':
+        target_tags = protector_cfg.get('target_tags', [4, 5])
+        tags = atoms.get_tags()
+        p_mask = np.isin(tags, target_tags)
+        s_mask = ~p_mask
+        return np.where(s_mask)[0], np.where(p_mask)[0]
+        
+    elif heuristic in ['z_height', 'graph']:
+        # Simple heuristic: trace graph
+        from scipy.sparse.csgraph import connected_components
+        from scipy.sparse import csr_matrix
+        from ase.data import covalent_radii
+        from ase.geometry import get_distances
+        
+        n_atoms = len(atoms)
+        adj = np.zeros((n_atoms, n_atoms), dtype=int)
+        D, d = get_distances(atoms.positions, atoms.positions, cell=atoms.cell, pbc=atoms.pbc)
+        
+        for i in range(n_atoms):
+            for j in range(i+1, n_atoms):
+                cutoff = covalent_radii[atoms.numbers[i]] + covalent_radii[atoms.numbers[j]] + 0.3
+                if d[i,j] < cutoff and d[i,j] > 0.1:
+                    adj[i,j] = 1
+                    adj[j,i] = 1
+                    
+        graph = csr_matrix(adj)
+        n_comp, labels = connected_components(csgraph=graph, directed=False)
+        
+        # Base substrate is usually the largest connected component
+        comp_sizes = np.bincount(labels)
+        substrate_comp = np.argmax(comp_sizes)
+        
+        s_mask = labels == substrate_comp
+        p_mask = labels != substrate_comp
+        
+        if verbose:
+            print(f"  [Protector Inference] Identified {np.sum(p_mask)} protector atoms and {np.sum(s_mask)} substrate atoms.")
+            
+        return np.where(s_mask)[0], np.where(p_mask)[0]
+        
+    return np.arange(len(atoms)), np.array([], dtype=int)
+    
+
+class CavityDetector:
+    def __init__(self, slab, substrate_indices, protector_indices, grid_res=0.2, verbose=False):
+        self.slab = slab
+        self.sub_idx = substrate_indices
+        self.prot_idx = protector_indices
+        self.grid_res = grid_res
+        self.verbose = verbose
+        
+    def find_void_centers(self, top_clearance=4.0):
+        import numpy as np
+        if len(self.prot_idx) == 0:
+            z_max = np.max(self.slab.positions[self.sub_idx, 2]) if len(self.sub_idx) else np.max(self.slab.positions[:, 2])
+            return [np.array([
+                self.slab.cell[0,0]*0.5, 
+                self.slab.cell[1,1]*0.5, 
+                z_max + top_clearance
+            ])]
+            
+        from ase.data import vdw_radii
+        from scipy.ndimage import distance_transform_edt
+        from scipy.ndimage import maximum_filter
+        
+        cell = self.slab.get_cell()
+        lx, ly = cell[0,0], cell[1,1]
+        
+        z_sub_top = np.max(self.slab.positions[self.sub_idx, 2])
+        z_prot_top = np.max(self.slab.positions[self.prot_idx, 2])
+        
+        if z_prot_top <= z_sub_top:
+            return [np.array([lx/2, ly/2, z_sub_top + top_clearance])]
+            
+        nx = int(np.ceil(lx / self.grid_res))
+        ny = int(np.ceil(ly / self.grid_res))
+        lz = (z_prot_top + top_clearance) - z_sub_top
+        nz = int(np.ceil(lz / self.grid_res))
+        
+        if nx <= 0 or ny <= 0 or nz <= 0:
+            return []
+            
+        grid = np.ones((nx, ny, nz), dtype=bool)
+        
+        for idx in self.prot_idx:
+            pos = self.slab.positions[idx]
+            r = 1.5
+            try:
+                r = vdw_radii[self.slab.numbers[idx]]
+                if np.isnan(r): r = 1.5
+            except:
+                pass
+            
+            gx = int((pos[0] % lx) / self.grid_res)
+            gy = int((pos[1] % ly) / self.grid_res)
+            gz = int((pos[2] - z_sub_top) / self.grid_res)
+            
+            ir = int(np.ceil((r + 1.2) / self.grid_res)) # 1.2A steric buffer
+            x_min, x_max = max(0, gx-ir), min(nx, gx+ir+1)
+            y_min, y_max = max(0, gy-ir), min(ny, gy+ir+1)
+            z_min, z_max = max(0, gz-ir), min(nz, gz+ir+1)
+            grid[x_min:x_max, y_min:y_max, z_min:z_max] = False
+            
+        dist = distance_transform_edt(grid) * self.grid_res
+        
+        local_max = maximum_filter(dist, size=3) == dist
+        local_max[dist < 0.5] = False
+        
+        max_coords = np.argwhere(local_max)
+        centers = []
+        sizes = []
+        for c in max_coords:
+            x = (c[0] + 0.5) * self.grid_res
+            y = (c[1] + 0.5) * self.grid_res
+            z = z_sub_top + (c[2] + 0.5) * self.grid_res
+            centers.append(np.array([x, y, z]))
+            sizes.append(dist[c[0], c[1], c[2]])
+            
+        centers = [x for _, x in sorted(zip(sizes, centers), key=lambda pair: pair[0], reverse=True)]
+        
+        if self.verbose:
+            print(f"  [CavityDetector] Found {len(centers)} potential void centers inside the protector layer.")
+            
+        # Cluster centers that are too close to reduce redundancy
+        filtered_centers = []
+        for c in centers:
+            if not filtered_centers:
+                filtered_centers.append(c)
+            else:
+                dists = np.linalg.norm(np.array(filtered_centers) - c, axis=1)
+                if np.all(dists > 2.0):
+                    filtered_centers.append(c)
+            if len(filtered_centers) >= 5: # keep top 5 unique cavities
+                break
+                
+        return filtered_centers

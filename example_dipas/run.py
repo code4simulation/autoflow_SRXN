@@ -70,7 +70,7 @@ def run_generic_adsorption_study(config_path='config.yaml'):
     # 1. Physisorption
     if do_phy:
         print("\n[1] Sampling Physisorption...")
-        phy_cands = mgr.generate_physisorption_candidates(mol, height=3.5, n_rot=rot_steps)
+        phy_cands = mgr.generate_physisorption_candidates(mol, height=3.5, n_rot=rot_steps, config=config)
         print(f"    -> Generated {len(phy_cands)} physisorption candidates.")
         for c in phy_cands: c.info['mechanism'] = 'physisorption'
         if phy_cands:
@@ -93,6 +93,14 @@ def run_generic_adsorption_study(config_path='config.yaml'):
         if chem_cands:
             write(f'{out_prefix}_chem.extxyz', chem_cands)
             all_results.extend(chem_cands)
+            
+            byproducts = []
+            for c in chem_cands:
+                if 'isolated_byproduct' in c.info:
+                    byproducts.append(c.info['isolated_byproduct'])
+            if byproducts:
+                write(f'{out_prefix}_isolated_byproducts.extxyz', byproducts)
+                print(f"    -> Saved {len(byproducts)} isolated byproducts to {out_prefix}_isolated_byproducts.extxyz")
         else:
             with open(f'{out_prefix}_chem.extxyz', 'w') as f:
                 pass
