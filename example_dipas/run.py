@@ -18,19 +18,45 @@ def run_generic_adsorption_study(config_path='config.yaml'):
     print(f"--- Starting Generic Config-Driven Adsorption Study ({config_path}) ---")
     config = load_config(config_path)
     
-    bulk_file = config['paths']['substrate']
+    bulk_file = config['paths'].get('substrate')
     mol_file = config['paths']['molecule']
     out_prefix = config['paths'].get('output_prefix', 'cands_out')
     
-    if not os.path.exists(bulk_file):
-        print(f"Error: {bulk_file} not found.")
-        return
     if not os.path.exists(mol_file):
         print(f"Error: {mol_file} not found.")
         return
         
-    slab = read(bulk_file)
     mol = read(mol_file)
+    slab = None
+
+    # --- [-1] Substrate Generation Phase ---
+    sub_gen_cfg = config.get('substrate_generation', {})
+    if sub_gen_cfg.get('enabled', False):
+        from surface_utils import create_slab_from_bulk
+        print("\n[-1] Generating Substrate Slab from Bulk...")
+        bulk_path = sub_gen_cfg.get('bulk_path')
+        if not bulk_path or not os.path.exists(bulk_path):
+            print(f"Error: Bulk structure {bulk_path} not found.")
+            return
+            
+        bulk_atoms = read(bulk_path)
+        slab = create_slab_from_bulk(
+            bulk_atoms=bulk_atoms,
+            miller_indices=sub_gen_cfg.get('miller_indices', [1, 0, 0]),
+            thickness=sub_gen_cfg.get('thickness', 10.0),
+            vacuum=sub_gen_cfg.get('vacuum', 10.0),
+            target_area=sub_gen_cfg.get('target_area'),
+            supercell_matrix=sub_gen_cfg.get('supercell_matrix'),
+            termination=sub_gen_cfg.get('termination'),
+            verbose=True
+        )
+        print(f"    -> Generated slab: {len(slab)} atoms, Cell: {slab.cell.get_bcl().tolist() if hasattr(slab.cell, 'get_bcl') else slab.cell}")
+        write("generated_slab.vasp", slab)
+    else:
+        if not bulk_file or not os.path.exists(bulk_file):
+            print(f"Error: Substrate file {bulk_file} not found and generation is disabled.")
+            return
+        slab = read(bulk_file)
     
     # --- [0] Passivation Phase ---
     pass_cfg = config.get('passivation', {})

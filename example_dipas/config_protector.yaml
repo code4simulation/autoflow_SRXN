@@ -1,7 +1,19 @@
 paths:
-  substrate: "../structures/SiO2_SAM_substrate.vasp" # Base substrate with a Self-Assembled Monolayer (SAM)
-  molecule: "../structures/TiCl4.vasp"             # Precursor molecule
+  # substrate: "../structures/SiO2_SAM_substrate.vasp" # Optional if generation is enabled
+  molecule: "../structures/TiCl4.vasp"
   output_prefix: "cands_sio2_sam"
+
+# [NEW] Automated Substrate Factory 
+substrate_generation:
+  enabled: false       # Set to true to generate from bulk
+  bulk_path: "../structures/Si_bulk.vasp"
+  miller_indices: [1, 0, 0]
+  thickness: 20.0
+  vacuum: 10.0
+  target_area: 160.0    # Maximizes area within this limit
+  # supercell_matrix: [[2, 0], [0, 2]] # Optional explicit expansion
+  termination: "symmetric" # Options: "none", "symmetric"
+
 
 settings:
   center_target: "Ti"

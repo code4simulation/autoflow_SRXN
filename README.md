@@ -27,12 +27,20 @@ The framework employs a spatial and heuristic engine to model surface interactio
 - **Void-Space Penetration**: Uses a 3D Distance Transform Voxel Grid to autonomously locate steric cavities (voids) within dense protector canopies, enabling targeted physisorption and accessibility-filtered chemisorption deep on the base substrate.
 - **Protector Ligand Exchange**: Simulates direct reactions with the protector layer by algorithmically identifying reactive leaves (e.g., `-OH`, `-Cl`) and performing substituent exchange. Stoichiometric byproducts (e.g., $HCl$) are automatically isolated into an independent simulation cell.
 
+### 1.5 Automated Substrate Factory
+The framework automates the transition from bulk crystals to surface slabs through integrated geometric calculations.
+- **Miller-to-Slab Calculation**: Generates oriented slabs from arbitrary $(h, k, l)$ Miller indices, automatically calculating layer requirements to satisfy a target physical thickness.
+- **Steric-Constraint Expansion**: Autonomously expands the surface area to satisfy a `target_area` constraint (e.g., $160 \, \text{\AA}^2$) while maximizing lattice squareness to optimize periodic boundary interaction.
+- **Symmetric Termination Search**: Performs a fractional coordinate grid search along the surface normal to identify stoichiometric or chemically symmetric termination planes.
+- **Lattice Vector Alignment**: Automatically rotates the generated supercell to align the primary lattice vector with the X-axis $(1, 0, 0)$ for standardized coordinate management.
+
 ---
 
 ## 2. Strategic Objectives
 - **High-Throughput Exploration**: Rational search of the potential energy surface (PES) for complex surface-molecule interactions.
 - **Automated Dataset Generation**: Systematic generation of unique structural configurations for training Machine Learning Interatomic Potentials (MLIPs).
 - **Generic Surface Passivation**: Config-driven passivation of top/bottom surfaces with arbitrary elements (H, F, Cl) prior to sampling.
+- **Automated Substrate Factory**: Direct generation of slabs from bulk structures with integrated thickness, area, and termination control.
 - **Surface Protector Modeling**: Automated handling of Self-Assembled Monolayers (SAMs), localized void space analysis, and protector ligand exchange.
 - **Thermodynamic Feasibility Analysis**: Quantifying spontaneous reaction pathways through temperature-dependent free energy landscapes.
 

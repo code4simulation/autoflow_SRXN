@@ -1,5 +1,8 @@
 import numpy as np
 from ase import Atoms
+from ase.build import surface, make_supercell
+from ase.io import read
+import math
 
 def find_surface_indices(atoms, side='top', threshold=1.0, species=None):
     """Find indices of atoms at the top or bottom surface based on Z-coordinates."""
@@ -365,3 +368,109 @@ class CavityDetector:
                 break
                 
         return filtered_centers
+
+def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_area=None, supercell_matrix=None, termination=None, verbose=False):
+    """
+    Generates a substrate slab from a bulk structure with geometric constraints.
+    """
+    # 1. Determine layers for thickness
+    # Create a 2-layer primitive to find interlayer spacing
+    s1 = surface(bulk_atoms, miller_indices, layers=1)
+    s2 = surface(bulk_atoms, miller_indices, layers=2)
+    
+    z1 = np.max(s1.positions[:, 2]) - np.min(s1.positions[:, 2])
+    z2 = np.max(s2.positions[:, 2]) - np.min(s2.positions[:, 2])
+    d_hkl = z2 - z1
+    
+    if d_hkl < 0.1: d_hkl = 2.0 
+    num_layers = int(math.ceil(thickness / d_hkl))
+    
+    # 2. Handle Termination
+    work_bulk = bulk_atoms.copy()
+    if termination == "symmetric":
+        if verbose: print("  [Substrate Factory] Searching for symmetric termination...")
+        # Try shifting the bulk along the normal to find a symmetric slab
+        best_shift = 0
+        min_diff = 1e9
+        
+        # Grid search along the normal axis (approx. first lattice vector of the surface basis)
+        # But easier: surface() uses the bulk cell to determine the cut. 
+        # We can shift the bulk atoms in their own fractional coords.
+        for shift in np.linspace(0, 1.0, 20, endpoint=False):
+            test_bulk = bulk_atoms.copy()
+            test_bulk.set_scaled_positions(test_bulk.get_scaled_positions() + [0, 0, shift])
+            test_bulk.wrap()
+            
+            test_slab = surface(test_bulk, miller_indices, layers=num_layers)
+            
+            # Simple symmetry check: count elements at top and bottom
+            z_coords = test_slab.positions[:, 2]
+            top_mask = z_coords > np.max(z_coords) - 0.5
+            bot_mask = z_coords < np.min(z_coords) + 0.5
+            
+            top_syms = sorted(test_slab.symbols[top_mask])
+            bot_syms = sorted(test_slab.symbols[bot_mask])
+            
+            if top_syms == bot_syms:
+                work_bulk = test_bulk
+                if verbose: print(f"  [Substrate Factory] Found symmetric termination at shift {shift:.2f}")
+                break
+    
+    # 3. Extract primitive slab
+    slab = surface(work_bulk, miller_indices, layers=num_layers, vacuum=vacuum)
+    
+    # 3. Supercell Expansion
+    if supercell_matrix is not None:
+        if verbose: print(f"  [Substrate Factory] Applying manual supercell matrix: {supercell_matrix}")
+        # Matrix should be 3x3 for make_supercell, but user usually gives 2x2.
+        m = np.eye(3)
+        m[0,0], m[0,1] = supercell_matrix[0][0], supercell_matrix[0][1]
+        m[1,0], m[1,1] = supercell_matrix[1][0], supercell_matrix[1][1]
+        slab = make_supercell(slab, m)
+    elif target_area is not None:
+        a1, a2 = slab.cell[0], slab.cell[1]
+        area_prim = np.linalg.norm(np.cross(a1, a2))
+        
+        # Max repeats while area <= target_area
+        max_repeats = int(target_area // area_prim)
+        if max_repeats < 1: max_repeats = 1
+        
+        # Find n, m such that n*m <= max_repeats and final cell is square-ish
+        # Target aspect ratio is 1.0. Current primitive aspect ratio is |a1|/|a2|
+        l1, l2 = np.linalg.norm(a1), np.linalg.norm(a2)
+        
+        best_n, best_m = 1, 1
+        best_score = -1.0
+        
+        for n in range(1, max_repeats + 1):
+            for m in range(1, max_repeats // n + 1):
+                current_area = n * m * area_prim
+                ratio = (n * l1) / (m * l2)
+                aspect_score = 1.0 / (1.0 + abs(ratio - 1.0)) # 1.0 is perfect, < 1.0 is worse
+                
+                # Balanced score: Area * AspectScore
+                # This penalizes highly elongated cells even if they have slightly more area
+                score = current_area * aspect_score
+                
+                if score > best_score + 1e-4:
+                    best_score = score
+                    best_n, best_m = n, m
+        
+        if verbose:
+            print(f"  [Substrate Factory] Primitive area: {area_prim:.2f} A^2. Target: {target_area} A^2.")
+            print(f"  [Substrate Factory] Selected expansion: {best_n}x{best_m} (Final area: {best_n*best_m*area_prim:.2f} A^2, Score: {best_score:.2f})")
+            
+        slab = slab * (best_n, best_m, 1)
+
+    # 4. Alignment: Rotate so first lattice vector is along [1,0,0]
+    v1 = slab.cell[0]
+    # Projected vector on XY plane
+    v1_xy = np.array([v1[0], v1[1], 0.0])
+    if np.linalg.norm(v1_xy) > 1e-4:
+        angle = -math.atan2(v1_xy[1], v1_xy[0])
+        slab.rotate(angle * 180 / math.pi, 'z', rotate_cell=True)
+    
+    # Final centering and wrapping
+    slab.wrap()
+    
+    return slab
