@@ -103,8 +103,15 @@ def run_generic_adsorption_study(config_path='config.yaml'):
             target_area=sub_gen_cfg.get('target_area'),
             supercell_matrix=sub_gen_cfg.get('supercell_matrix'),
             termination=sub_gen_cfg.get('termination'),
+            top_termination=sub_gen_cfg.get('top_termination'),
+            bottom_termination=sub_gen_cfg.get('bottom_termination'),
             verbose=verbose
         )
+        # Standardize and save the raw substrate
+        from surface_utils import standardize_vasp_atoms
+        raw_slab = standardize_vasp_atoms(slab, z_min_offset=0.5)
+        write('generated_substrate.vasp', raw_slab)
+        logger.info("Saved generated raw substrate to 'generated_substrate.vasp'.")
     else:
         slab = read(bulk_file)
 

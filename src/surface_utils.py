@@ -413,12 +413,13 @@ class CavityDetector:
                 
         return filtered_centers
 
-def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_area=None, supercell_matrix=None, termination=None, verbose=False):
+def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_area=None, supercell_matrix=None, 
+                           termination=None, top_termination=None, bottom_termination=None, verbose=False):
     """
     Generates a substrate slab from a bulk structure with geometric constraints.
+    Supports asymmetric termination control (top vs bottom).
     """
     # 1. Determine layers for thickness
-    # Create a 2-layer primitive to find interlayer spacing
     s1 = surface(bulk_atoms, miller_indices, layers=1)
     s2 = surface(bulk_atoms, miller_indices, layers=2)
     
@@ -430,12 +431,17 @@ def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_
     num_layers = int(math.ceil(thickness / d_hkl))
     
     # 2. Handle Termination & Slicing (Layer-Wise Engine)
-    if termination in ["symmetric", "uniform"]:
-        mode_label = termination
-        if verbose: print(f"  [Substrate Factory] Executing Layer-Wise {mode_label} Discovery...")
+    # If generic 'termination' is provided, treat it as symmetric top/bottom
+    if termination and not top_termination: top_termination = termination
+    if termination and not bottom_termination: bottom_termination = termination
+
+    # Enable layer discovery if any termination constraint is set
+    any_term = any([termination, top_termination, bottom_termination])
+    
+    if any_term or termination in ["symmetric", "uniform"]:
+        if verbose: print(f"  [Substrate Factory] Executing Layer-Wise Discovery (Bottom={bottom_termination}, Top={top_termination})...")
         
-        # Create a sufficiently thick base slab to find matching layers
-        # layers=num_layers*2 ensuring we have at least 2 full unit cells to pick from
+        # Create a sufficiently thick base slab
         test_slab = surface(bulk_atoms, miller_indices, layers=num_layers * 2, vacuum=0)
         test_slab.wrap()
         
@@ -444,7 +450,6 @@ def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_
         sorted_indices = np.argsort(z_coords)
         sorted_z = z_coords[sorted_indices]
         
-        # Simple clustering: points within 0.5A belong to the same plane
         planes = []
         if len(sorted_z) > 0:
             current_plane = [sorted_indices[0]]
@@ -476,41 +481,55 @@ def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_
         
         for i in range(len(plane_data)):
             for j in range(i + 1, len(plane_data)):
-                p1, p2 = plane_data[i], plane_data[j]
+                p_bot, p_top = plane_data[i], plane_data[j]
                 
-                # Criterion 1: Termination Match
-                species_match = (p1['elements'] == p2['elements'])
-                count_match = (p1['sym_list'] == p2['sym_list'])
-                
-                # Criterion 2: Thickness Proximity
-                dist = p2['z'] - p1['z']
+                # Baseline scoring factors
+                dist = p_top['z'] - p_bot['z']
                 thickness_err = abs(dist - thickness)
                 
-                # Scoring: Species match is high priority, then count match, then thickness
                 score = 0
-                if species_match: score += 1000
-                if count_match: score += 500
                 
-                # Favor O-termination for oxides if available
-                if species_match and 'O' in p1['elements'] and len(p1['elements']) == 1:
-                    score += 200
+                # Criterion 1: User-defined Termination Match
+                bot_match = (not bottom_termination) or (bottom_termination in p_bot['elements'])
+                top_match = (not top_termination) or (top_termination in p_top['elements'])
                 
-                score -= thickness_err * 10 # Penalty for deviating from target thickness
+                if bottom_termination and bot_match: score += 2000
+                if top_termination and top_match: score += 2000
+                
+                # Criterion 2: Symmetry/Uniformity (if requested or as secondary score)
+                species_match = (p_bot['elements'] == p_top['elements'])
+                count_match = (p_bot['sym_list'] == p_top['sym_list'])
+                if species_match: score += 500
+                if count_match: score += 200
+                
+                # Favor O-termination for unknown oxides
+                if 'O' in p_top['elements'] and len(p_top['elements']) == 1:
+                    score += 100
+                
+                # Criterion 3: Thickness Proximity (Penalty)
+                score -= thickness_err * 20 
                 
                 if score > best_score:
                     best_score = score
-                    best_pair = (p1, p2)
+                    best_pair = (p_bot, p_top)
         
         if best_pair:
-            p1, p2 = best_pair
+            p_bot, p_top = best_pair
+            
+            # Check for "Impossible Conditions" warning
+            actual_bot_match = (not bottom_termination) or (bottom_termination in p_bot['elements'])
+            actual_top_match = (not top_termination) or (top_termination in p_top['elements'])
+            if (bottom_termination or top_termination) and not (actual_bot_match and actual_top_match):
+                print(f"  [Substrate Factory] WARNING: Requested termination ({bottom_termination}/{top_termination}) could not be fully satisfied. Using best match.")
+            
             # Extraction: All atoms between these planes (inclusive)
-            mask = (z_coords >= p1['z'] - 0.1) & (z_coords <= p2['z'] + 0.1)
+            mask = (z_coords >= p_bot['z'] - 0.1) & (z_coords <= p_top['z'] + 0.1)
             slab = test_slab[mask]
             if verbose:
-                print(f"  [Substrate Factory] Selected planes {p1['idx']} and {p2['idx']}.")
-                print(f"  [Substrate Factory] Terminal Species: {p1['elements']}, Thickness: {p2['z']-p1['z']:.2f} A")
+                print(f"  [Substrate Factory] Selected planes {p_bot['idx']} and {p_top['idx']}.")
+                print(f"  [Substrate Factory] Terminal Bottom: {p_bot['elements']}, Top: {p_top['elements']}, Thickness: {p_top['z']-p_bot['z']:.2f} A")
         else:
-            if verbose: print("  [Substrate Factory] Warning: No matching layers found. Falling back.")
+            if verbose: print("  [Substrate Factory] Warning: No valid layers found. Falling back.")
             slab = surface(bulk_atoms, miller_indices, layers=num_layers, vacuum=0)
     else:
         # Default cut
