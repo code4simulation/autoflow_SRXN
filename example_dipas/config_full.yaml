@@ -1,0 +1,65 @@
+# =============================================================================
+# AutoFlow-SRXN: Master Configuration Template (Full Settings)
+# =============================================================================
+
+paths:
+  substrate: "../structures/Si_mp149.vasp"   # Base bulk or slab file
+  inhibitor: "../structures/ethanol.vasp"     # Stage 1 molecule (Inhibitor)
+  molecule: "../structures/DIPAS.vasp"        # Stage 2 molecule (Main Precursor)
+  output_prefix: "discovery_results"          # Base name for output files
+
+substrate_generation:
+  run_generation: True                        # Enable automated slab factory
+  bulk_path: "../structures/Si_mp149.vasp"    # Path to bulk cell
+  miller_indices: [1, 0, 0]                   # Orientation (h, k, l)
+  thickness: 12.0                             # Target thickness in Angstroms
+  vacuum: 15.0                                # Vacuum buffer in Angstroms
+  target_area: 500.0                          # Target surface area (A^2)
+  # supercell_matrix: [[4,0,0], [0,4,0], [0,0,1]] # Manual expansion (optional)
+
+passivation:
+  run_passivation: True                       # Enable geometric passivation
+  element: "H"                                # Passivation element (H, F, Cl, etc.)
+  side: "bottom"                              # "top", "bottom", or "both"
+  coverage: 1.0                               # Surface site coverage (0.0 to 1.0)
+
+adsorbate_generation:
+  # --- Stage 1 Discovery Settings (Inhibitor) ---
+  run_pre_inhibition: True                    # Run Stage 1 before Main Precursor
+  inhibitor_center: 1                         # Reactive site index for Inhibitor
+  branching_limit: 1                          # Top N Stage 1 templates to promote to Stage 2
+
+  # --- Physical Constraints ---
+  overlap_cutoff: 1.5                         # Internal/Inter-molecular clash distance (A)
+  physisorption_height: 3.5                   # Initial placement height for rigid-body search
+  
+  # --- Execution Control ---
+  run_physisorption: True                     # Enable non-bonding search
+  run_chemisorption: True                     # Enable bonding (mechanistic) search
+  rot_steps: 8                                # Number of rotation attempts per site
+  symprec: 0.2                                # Symmetry reduction precision
+
+  # --- Stage 2 Discovery Settings (Precursor) ---
+  precursor_center: "Si"                      # Reactive site symbol or index for Precursor
+
+ideal_coordination:
+  # Target valency for various elements to detect undercoordinated sites
+  Si: 4
+  C: 4
+  O: 2
+  N: 3
+  Al: 3
+  Ti: 6
+
+protector:
+  # Settings for SAMs or existing protective layers
+  enabled: False                              # Enable void detection if slab has protectors
+  grid_resolution: 0.2                        # Voxel resolution for distance transform
+  element: ["C", "S", "O"]                    # Elements considered part of the protector layer
+
+potentials:
+  # Settings for SimulationEngine and relaxation
+  model_type: "mace0"                         # "mace0" (Foundation), "emt", "lammps"
+  device: "cpu"                               # "cpu" or "cuda"
+  fmax: 0.05                                  # Force convergence criterion (eV/A)
+  steps: 200                                  # Max relaxation steps

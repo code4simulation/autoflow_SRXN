@@ -43,7 +43,8 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True,
     # 1. Physisorption
     if run_phy:
         logger.info(f"  Searching for Physisorption (Rigid-body) candidates for {mol.get_chemical_formula()}...")
-        phy_cands = mgr.generate_physisorption_candidates(mol, height=3.5, n_rot=rot_steps, config=config, tag=tag)
+        phy_height = ads_gen_cfg.get('physisorption_height', 3.5)
+        phy_cands = mgr.generate_physisorption_candidates(mol, height=phy_height, n_rot=rot_steps, config=config, tag=tag)
         for c in phy_cands: c.info['mechanism'] = 'physisorption'
         all_cands.extend(phy_cands)
 
