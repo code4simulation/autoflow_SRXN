@@ -4,12 +4,9 @@ import yaml
 import numpy as np
 from ase.io import read, write
 
-# Add the src directory to Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
-
-from ads_workflow_mgr import AdsorptionWorkflowManager
-from chemisorption_builder import build_chemisorption_structures
-from logger_utils import setup_logger
+from autoflow_srxn.ads_workflow_mgr import AdsorptionWorkflowManager
+from autoflow_srxn.chemisorption_builder import build_chemisorption_structures
+from autoflow_srxn.logger_utils import setup_logger
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -92,7 +89,7 @@ def run_generic_adsorption_study(config_path='config.yaml'):
     # --- STAGE 0: Substrate Generation & Geometric Passivation ---
     sub_gen_cfg = config.get('substrate_generation', {})
     if sub_gen_cfg.get('run_generation', sub_gen_cfg.get('enabled', False)):
-        from surface_utils import create_slab_from_bulk
+        from autoflow_srxn.surface_utils import create_slab_from_bulk
         logger.info("STAGE 0: Generating/Loading Substrate...")
         bulk_atoms = read(sub_gen_cfg['bulk_path'])
         slab = create_slab_from_bulk(
@@ -108,7 +105,7 @@ def run_generic_adsorption_study(config_path='config.yaml'):
             verbose=verbose
         )
         # Standardize and save the raw substrate
-        from surface_utils import standardize_vasp_atoms
+        from autoflow_srxn.surface_utils import standardize_vasp_atoms
         raw_slab = standardize_vasp_atoms(slab, z_min_offset=0.5)
         write('generated_substrate.vasp', raw_slab)
         logger.info("Saved generated raw substrate to 'generated_substrate.vasp'.")
@@ -117,7 +114,7 @@ def run_generic_adsorption_study(config_path='config.yaml'):
 
     pass_cfg = config.get('passivation', {})
     if pass_cfg.get('run_passivation', pass_cfg.get('enabled', False)):
-        from surface_utils import passivate_surface_coverage_general
+        from autoflow_srxn.surface_utils import passivate_surface_coverage_general
         logger.info("Applying Geometric Passivation...")
         side = pass_cfg.get('side', 'bottom')
         sides = [side] if side != 'both' else ['top', 'bottom']

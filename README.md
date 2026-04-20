@@ -64,13 +64,13 @@ The framework integrates the **MACE (Multi-ACE)** foundation models for high-fid
 ```mermaid
 graph TD
     A[config.yaml] --> B(Structure Generation Interface)
-    subgraph src [Core Algorithmic Engines]
-        B --> P[Unified Passivation Engine]
-        P -->|CIF/VASP Export| PA[passivated_surface.vasp]
+    subgraph pkg [autoflow_srxn Package]
+        B --> P[Surface Utils]
+        P -->|CIF/VASP Export| PA[Standardized Substrate]
         B --> C[AdsorptionWorkflowManager]
         PA -.-> C
         C --> D[ChemisorptionBuilder]
-        D -->|VSEPR Heuristics| E[surface_utils]
+        D -->|VSEPR Heuristics| SY[Symmetry Engine]
         
         subgraph MS [Multi-Stage Discovery]
             C -->|Stage 1| S1((Inhibitor Discovery))
@@ -85,11 +85,13 @@ graph TD
     
     subgraph Output
         F --> G[.extxyz Candidates]
+        PA --> H[generated_substrate.vasp]
     end
 ```
 
 ### 3.2 Directory Structure
-- `src/`: Core algorithmic implementations (Coordination logic, collision detection).
+- `src/autoflow_srxn/`: Core package logic (Coordination, collision, MLIP potentials).
+- `setup.py` / `pyproject.toml`: Package installation and dependency management.
 - `free_energy/`: Statistical mechanics engine for thermodynamic property parsing.
 - `example_dipas/`: Executable sandbox for Si(100) surface manipulation and validation.
 - `structures/`: Storage for precursor and substrate base configurations.
@@ -98,19 +100,43 @@ graph TD
 
 ## 4. Operational Harness
 
-### 4.1 Environment Setup
-Ensure a localized Python environment is active:
+### 4.1 Installation
+The framework is now structured as a standard Python package. It is recommended to use a virtual environment.
+
+**Step 1: Environment Setup**
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # 或 .venv\Scripts\activate (Windows)
-pip install -r requirements.txt
 ```
 
-### 4.2 Structural Generation
-To execute the automated workflow for the Si(100) surface case:
+**Step 2: Install Package**
 ```bash
-cd example_dipas
-python run.py
+# Basic installation (dependencies only)
+pip install .
+
+# Installation with MACE-MP support (torch/MLIP)
+pip install ".[mace]"
+```
+
+### 4.2 Standard Workflow (example_dipas)
+To execute the multi-stage reaction simulation on the Si(100) surface:
+
+1. **Configure**: Edit `example_dipas/config_full.yaml` to set your physical parameters (termination, thickness, etc.).
+2. **Execute**:
+   ```bash
+   cd example_dipas
+   python run.py
+   ```
+3. **Verify Stages**:
+   - **Stage 0**: Raw substrate is generated and saved as `generated_substrate.vasp`.
+   - **Stage 1**: Surface is passivated/inhibited and saved as `passivated.vasp`.
+   - **Stage 2**: Adsorption candidates for the precursor are generated in `.extxyz` format. 
+
+### 4.3 Thermodynamic Post-Processing
+To calculate the Gibbs Free Energy at $T=298.15K$:
+```bash
+cd free_energy
+python analyze_thermo.py phonopy.yaml --energy -14.50 --mode gas --mass 18.02
 ```
 
 ### 4.3 Thermodynamic Post-Processing

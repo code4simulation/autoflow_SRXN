@@ -3,9 +3,7 @@ import sys
 from ase.build import molecule
 from ase.io import read
 
-# Add current dir to path
-sys.path.append(os.path.dirname(__file__))
-from potentials import SimulationEngine
+from .potentials import SimulationEngine
 
 def test_relaxation():
     print("--- Testing SimulationEngine with MACE ---")

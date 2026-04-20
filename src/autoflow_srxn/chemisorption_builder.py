@@ -1,13 +1,13 @@
 import numpy as np
 from ase import Atoms
-from ads_workflow_mgr import AdsorptionWorkflowManager
-from knowledge_engine import chem_kb
+from .ads_workflow_mgr import AdsorptionWorkflowManager
+from .knowledge_engine import chem_kb
 
 def analyze_surface_reactivity(surface, config, verbose=True):
     from ase.neighborlist import neighbor_list
     import numpy as np
     from ase.data import covalent_radii
-    from surface_utils import identify_protectors
+    from .surface_utils import identify_protectors
     
     max_pair_dist = config.get('settings', {}).get('max_pair_dist', 5.0)
     
@@ -58,7 +58,7 @@ def analyze_surface_reactivity(surface, config, verbose=True):
         expected = chem_kb.get_ideal_coordination(sym, config)
         
         if actual_coord < expected:
-            from surface_utils import generate_vsepr_vectors
+            from .surface_utils import generate_vsepr_vectors
             vecs = generate_vsepr_vectors(surface, idx, neighbor_data=(i_list, j_list, D_list))
             for db_vec in vecs:
                 db_vec = db_vec / np.linalg.norm(db_vec)
@@ -123,155 +123,10 @@ def analyze_surface_reactivity(surface, config, verbose=True):
             
     results['pairs'] = list(unique_pairs.values())
     
-    # [3] Search for Multi-Site (Chelating) Archetypes
-    # Find sets of 3+ sites that form a compact cluster
-    # This can be expanded in the future for complex clusters
-    
     if verbose:
         print(f"  [Generic Reactivity] Formed {pair_count} active site pairs -> Symmetry reduced to {len(results['pairs'])} unique pairs.")
         
     return results
-
-
-def analyze_molecule_ligands(molecule, center_target='Si', verbose=True):
-    """
-    Algorithmically fragments the precursor molecule to identify reactive ligands.
-    Uses AdsorptionWorkflowManager implicitly for the heavy lifting.
-    """
-import numpy as np
-from ase import Atoms
-from ads_workflow_mgr import AdsorptionWorkflowManager
-from knowledge_engine import chem_kb
-
-def analyze_surface_reactivity(surface, config, verbose=True):
-    from ase.neighborlist import neighbor_list
-    import numpy as np
-    from ase.data import covalent_radii
-    from surface_utils import identify_protectors
-    
-    max_pair_dist = config.get('settings', {}).get('max_pair_dist', 5.0)
-    
-    sub_idx, prot_idx = identify_protectors(surface, config, verbose=False)
-    
-    i_list, j_list, D_list = neighbor_list('ijD', surface, cutoff=3.0) 
-    d_list = np.linalg.norm(D_list, axis=1)
-    
-    dangling_sites = []
-    exchange_sites = []
-    
-    z_max = max(surface.positions[:, 2])
-    z_sub_max = max(surface.positions[sub_idx, 2]) if len(sub_idx) else z_max
-    
-    for idx in range(len(surface)):
-        if idx in sub_idx and surface.positions[idx, 2] < z_sub_max - 2.5: continue
-        sym = surface.symbols[idx]
-        
-        if idx in prot_idx:
-            reactive_leaves = config.get('protector', {}).get('reactive_leaves', [])
-            if sym in reactive_leaves:
-                neighbors = []
-                for n_i, n_j, dist, vec in zip(i_list, j_list, d_list, D_list):
-                    if n_i == idx and dist > 0.1 and dist < 2.0:
-                        neighbors.append((n_j, vec))
-                if len(neighbors) == 1:
-                    db_vec = -neighbors[0][1]
-                    db_vec = db_vec / np.linalg.norm(db_vec)
-                    exchange_sites.append({
-                        'index': idx,
-                        'backbone_idx': neighbors[0][0],
-                        'sym': sym,
-                        'pos': surface.positions[neighbors[0][0]],
-                        'leaf_pos': surface.positions[idx],
-                        'db_vector': db_vec,
-                        'missing_bonds': 1
-                    })
-            continue
-            
-        neighbors = []
-        for n_i, n_j, dist in zip(i_list, j_list, d_list):
-            if n_i == idx:
-                cutoff_val = covalent_radii[surface.numbers[n_i]] + covalent_radii[surface.numbers[n_j]] + 0.3
-                if dist < cutoff_val and dist > 0.1:
-                    neighbors.append(n_j)
-                    
-        actual_coord = len(neighbors)
-        expected = chem_kb.get_ideal_coordination(sym, config)
-        
-        if actual_coord < expected:
-            from surface_utils import generate_vsepr_vectors
-            vecs = generate_vsepr_vectors(surface, idx, neighbor_data=(i_list, j_list, D_list))
-            for db_vec in vecs:
-                db_vec = db_vec / np.linalg.norm(db_vec)
-                hit = False
-                if len(prot_idx) > 0:
-                    for p in prot_idx:
-                        p_vec = surface.positions[p] - surface.positions[idx]
-                        proj = np.dot(p_vec, db_vec)
-                        if proj > 0.5:
-                            dist_to_ray = np.linalg.norm(p_vec - proj*db_vec)
-                            if dist_to_ray < 1.5:
-                                hit = True
-                                break
-                if not hit:
-                    dangling_sites.append({
-                        'index': idx,
-                        'sym': sym,
-                        'pos': surface.positions[idx],
-                        'db_vector': db_vec,
-                        'missing_bonds': expected - actual_coord
-                    })
-                    break 
-            
-    if verbose:
-        print(f"  [Generic Reactivity] Identified {len(dangling_sites)} undercoordinated surface sites and {len(exchange_sites)} protector exchange sites.")
-        
-    results = {'single': dangling_sites, 'pairs': [], 'exchange': exchange_sites}
-    
-    # Analyze Symmetry to reduce pair redundancies
-    import spglib
-    lattice = surface.get_cell()
-    pos = surface.get_scaled_positions()
-    nums = surface.get_atomic_numbers()
-    symprec = config.get('settings', {}).get('symprec', 0.2)
-    
-    equiv_atoms = np.arange(len(surface))
-    for prec in [symprec, 0.5]:
-        try:
-            dataset = spglib.get_symmetry_dataset((lattice, pos, nums), symprec=prec)
-            if dataset:
-                equiv_atoms = dataset.equivalent_atoms if hasattr(dataset, 'equivalent_atoms') else dataset['equivalent_atoms']
-                if len(np.unique(equiv_atoms)) < len(surface) or prec == 0.5:
-                    break
-        except Exception:
-            pass
-            
-    from itertools import combinations
-    unique_pairs = {}
-    pair_count = 0
-    
-    for s1, s2 in combinations(dangling_sites, 2):
-        dist = np.linalg.norm(s1['pos'] - s2['pos'])
-        if dist <= max_pair_dist:
-            pair_count += 1
-            # Pair signature: sorted tuple of symmetry classes + rounded distance
-            c1 = equiv_atoms[s1['index']]
-            c2 = equiv_atoms[s2['index']]
-            sig = tuple(sorted([c1, c2])) + (round(dist, 1),)
-            
-            if sig not in unique_pairs:
-                unique_pairs[sig] = (s1, s2)
-            
-    results['pairs'] = list(unique_pairs.values())
-    
-    # [3] Search for Multi-Site (Chelating) Archetypes
-    # Find sets of 3+ sites that form a compact cluster
-    # This can be expanded in the future for complex clusters
-    
-    if verbose:
-        print(f"  [Generic Reactivity] Formed {pair_count} active site pairs -> Symmetry reduced to {len(results['pairs'])} unique pairs.")
-        
-    return results
-
 
 def analyze_molecule_ligands(molecule, center_target='Si', verbose=True):
     """
@@ -282,7 +137,6 @@ def analyze_molecule_ligands(molecule, center_target='Si', verbose=True):
     mgr = AdsorptionWorkflowManager(molecule, verbose=verbose)
     c_idx, ligands = mgr.discover_ligands(molecule, center_target=center_target, verbose=verbose)
     return c_idx, ligands
-
 
 def build_chemisorption_structures(molecule, center_target='Si', surface=None, rot_steps=8, config=None, verbose=True, tag=2):
     """
@@ -320,7 +174,6 @@ def build_chemisorption_structures(molecule, center_target='Si', surface=None, r
         print(f"--- Finished Chemisorption Builder. Total Generated: {len(candidates)} ---\n")
         
     return candidates
-
 
 def _execute_generic_single_site(mgr, molecule, c_idx, ligands, sites, rot_steps, tag=2):
     """ Internal subroutine to execute Generic Single Site Addition/Exchange """
@@ -375,7 +228,6 @@ def _execute_generic_single_site(mgr, molecule, c_idx, ligands, sites, rot_steps
                     stats['overlap'] += 1
                     
     return candidates
-
 
 def _execute_generic_dissociation(mgr, molecule, c_idx, ligands, pairs, rot_steps, tag=2):
     """ Internal subroutine to execute Generic Dissociative Chemisorption on pairs of dangling bonds """

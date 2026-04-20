@@ -7,8 +7,8 @@ from rdkit.Chem import AllChem
 import os
 import spglib
 from itertools import combinations
-from knowledge_engine import chem_kb
-from logger_utils import get_workflow_logger
+from .knowledge_engine import chem_kb
+from .logger_utils import get_workflow_logger
 
 class AdsorptionWorkflowManager:
     """
@@ -251,7 +251,7 @@ class AdsorptionWorkflowManager:
 
     def generate_physisorption_candidates(self, molecule, height=3.5, n_rot=32, rot_center='com', config=None, tag=2):
         from itertools import product
-        from surface_utils import identify_protectors, CavityDetector
+        from .surface_utils import identify_protectors, CavityDetector
         phi = np.pi * (3.0 - np.sqrt(5.0))
         # Unique rotations
         rot_vectors, sampled_coords = [], []
