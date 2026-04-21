@@ -34,8 +34,11 @@ def run_enhanced_phonon_refinement(config_path='config.yaml', displacement=None)
     mol_path = config['paths']['molecule']
     logger.info(f"Loading molecule from: {mol_path}")
     atoms = read(mol_path)
-    atoms.set_cell([20, 20, 20])
-    atoms.center()
+    
+    # Adaptive cell sizing: Setup cell with 10A vacuum in all directions
+    atoms.center(vacuum=10.0)
+    cell = atoms.get_cell()
+    logger.info(f"Adaptive Cell Size: {cell[0,0]:.2f} x {cell[1,1]:.2f} x {cell[2,2]:.2f} A (10A Vacuum)")
     
     # 4. Perform Initial Relaxation
     logger.info(f"Performing initial relaxation with {config['potentials']['model_type']} (ultra-tight CG+FIRE)...")
