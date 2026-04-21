@@ -24,18 +24,18 @@ The refinement workflow follows a "Perturb-and-Relax" cycle:
 
 ### A. Sensitivity-Driven Phonon Analysis
 We utilize the finite displacement method to construct the Hessian. To differentiate between actual PES curvature and numerical artifacts (noise), we performed a sensitivity study across varying displacement scales ($u$):
-- **Displacement Parameter ($u$)**: Tested at $0.01, 0.005, \text{ and } 0.001 \text{ \AA}$.
+- **Displacement Parameter ($u$)**: Tested at $0.01, 0.005, \text{ and } 0.001$ Å.
 
 ### B. Hierarchical Relaxation Scheme
 To ensure the system reaches the deepest part of the local potential well, we implement a two-stage relaxation:
 1. **Conjugate Gradient (CG)**: Utilized for rapid initial descent from the high-energy perturbed state.
 2. **FIRE (Fast Inertial Relaxation Engine)**: A robust inertia-based optimizer used for final convergence to an ultra-tight threshold.
-- **Convergence Criterion**: $f_{max} < 0.001 \text{ eV/\AA}$.
+- **Convergence Criterion**: $f_{max} < 0.001 \text{ eV/Å}$.
 
 ### C. Mode-Following Perturbation
 For each identified imaginary mode with $\nu < -0.1 \text{ THz}$, the atomic positions $\mathbf{R}$ are updated:
 $$\mathbf{R}_{new} = \mathbf{R}_{old} + \alpha \cdot \mathbf{e}_{imag}$$
-where $\alpha$ is the perturbation scale (initially $0.1 \text{ \AA}$) and $\mathbf{e}_{imag}$ is the normalized eigenvector of the unstable mode.
+where $\alpha$ is the perturbation scale (initially $0.1$ Å) and $\mathbf{e}_{imag}$ is the normalized eigenvector of the unstable mode.
 
 ## 3. Simulation Results and Analysis
 
