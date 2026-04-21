@@ -24,15 +24,30 @@ Where:
 ### Prerequisites
 Ensure you have the `qpoints.yaml` file generated from a previous vibrational analysis (e.g., from the `mode_following_relaxation` example).
 
-### Basic Command (Adsorbate)
+### Execution
+The tool is now entirely configuration-driven. All parameters such as energy, mass, and symmetry must be defined in your `config.yaml`.
+
 ```bash
-python run_thermo_analysis.py qpoints.yaml --energy -130.458 --mode adsorbent
+# Execute with a specific config
+python run_thermo_analysis.py config_H2.yaml
+
+# Execute with default config.yaml in the current directory
+python run_thermo_analysis.py
 ```
 
-### Gas Phase Command
-For gas phase, you must provide the molecular mass and moments of inertia.
-```bash
-python run_thermo_analysis.py qpoints.yaml --energy -125.2 --mode gas --mass 133.2 --sigma 1 --moments 450.2 450.2 800.5
+## 3. Configuration Format
+Your YAML file must contain a `thermochemistry` section as shown below:
+
+```yaml
+thermochemistry:
+  qpoints_file: "sample_data/qpoints_H2.yaml"
+  electronic_energy: -6.772
+  mode: "gas"
+  temperature_range: [298.15, 500, 1000]
+  gas_properties:
+    mass: 2.016
+    sigma: 2
+    moments: [0.280]
 ```
 
 ## 3. Tool Description

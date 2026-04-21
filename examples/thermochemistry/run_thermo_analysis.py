@@ -80,65 +80,54 @@ def print_table(results, title="Thermochemistry"):
         print(f"{r['T']:8.2f} | {r['S']:12.4f} | {r['G_kJ_mol']:12.4f} | {r['G_eV']:12.6f}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Calculate Gibbs Free Energy from qpoints.yaml or config.yaml")
-    parser.add_argument("input", help="qpoints.yaml or config.yaml file")
-    parser.add_argument("--energy", type=float, help="Electronic energy E_elec (eV)")
-    parser.add_argument("--mode", choices=['gas', 'adsorbent', 'substrate'], help="Calculation mode")
-    parser.add_argument("--mass", type=float, help="Molecular mass (amu)")
-    parser.add_argument("--sigma", type=int, help="Symmetry number")
-    parser.add_argument("--moments", type=float, nargs='+', help="Moments of inertia")
-    parser.add_argument("--temps", type=float, nargs='+', help="Temperatures to evaluate (K)")
+    # Use first argument as config path or default to local config.yaml
+    input_path = sys.argv[1] if len(sys.argv) > 1 else 'config.yaml'
     
-    args = parser.parse_args()
-    
-    if not os.path.exists(args.input):
-        print(f"Error: File {args.input} not found.")
+    if not os.path.exists(input_path):
+        print(f"Error: Configuration file '{input_path}' not found.")
+        print("Usage: python run_thermo_analysis.py [config.yaml]")
         return
 
-    # Default settings
-    qpoints_file = args.input
-    e_elec = args.energy if args.energy is not None else 0.0
-    mode = args.mode if args.mode is not None else 'adsorbent'
-    mass = args.mass
-    sigma = args.sigma if args.sigma is not None else 1
-    moments = args.moments
-    temps = args.temps if args.temps is not None else [298.15, 400, 500, 600, 700, 800]
-
-    # Check if input is a config.yaml (contains 'thermochemistry' key)
-    if args.input.endswith('.yaml'):
-        with open(args.input, 'r') as f:
-            raw_data = yaml.safe_load(f)
-            if raw_data and 'thermochemistry' in raw_data:
-                cfg = raw_data['thermochemistry']
-                print(f"Loading settings from config: {args.input}")
-                
-                # Resolve paths relative to config file location
-                base_dir = os.path.dirname(os.path.abspath(args.input))
-                q_raw = cfg.get('qpoints_file', 'qpoints.yaml')
-                qpoints_file = os.path.normpath(os.path.join(base_dir, q_raw))
-                
-                e_elec = cfg.get('electronic_energy', e_elec)
-                mode = cfg.get('mode', mode)
-                temps = cfg.get('temperature_range', temps)
-                
-                if 'gas_properties' in cfg:
-                    g_cfg = cfg['gas_properties']
-                    mass = g_cfg.get('mass', mass)
-                    sigma = g_cfg.get('sigma', sigma)
-                    moments = g_cfg.get('moments', moments)
-
+    # Load All Settings from YAML (No argparse)
+    with open(input_path, 'r') as f:
+        config = yaml.safe_load(f)
+        
+    if not config or 'thermochemistry' not in config:
+        print("Error: Invalid configuration format. Missing 'thermochemistry' section.")
+        return
+        
+    cfg = config['thermochemistry']
+    
+    # Resolve Path for qpoints
+    base_dir = os.path.dirname(os.path.abspath(input_path))
+    q_rel = cfg.get('qpoints_file', 'qpoints.yaml')
+    qpoints_file = os.path.normpath(os.path.join(base_dir, q_rel))
+    
     if not os.path.exists(qpoints_file):
-        print(f"Error: qpoints file {qpoints_file} not found.")
+        print(f"Error: Vibrational data '{qpoints_file}' not found.")
         return
 
+    # Extract parameters
+    e_elec = cfg.get('electronic_energy', 0.0)
+    mode = cfg.get('mode', 'adsorbent')
+    temps = cfg.get('temperature_range', [298.15])
+    
+    gas_cfg = cfg.get('gas_properties', {})
+    mass = gas_cfg.get('mass')
+    sigma = gas_cfg.get('sigma', 1)
+    moments = gas_cfg.get('moments')
+
+    # Execute Analysis
     analyzer = AnalyzeThermo(qpoints_file, e_elec)
     
-    print(f"Calculation Context:")
-    print(f"  Input YAML: {qpoints_file}")
-    print(f"  Mode: {mode}")
-    print(f"  E_elec: {e_elec:.6f} eV")
+    print(f"\n{'='*20} AutoFlow-SRXN THERMO ANALYSIS {'='*20}")
+    print(f"  Configuration: {input_path}")
+    print(f"  Input YAML:    {qpoints_file}")
+    print(f"  Mode:          {mode}")
+    print(f"  E_elec:        {e_elec:.6f} eV")
+    
     if mode == 'gas':
-        print(f"  Gas Prop: mass={mass}, sigma={sigma}, moments={moments}")
+        print(f"  Gas Prop:      mass={mass} amu, sigma={sigma}, moments={moments}")
     
     try:
         results = analyzer.run_analysis(
@@ -150,7 +139,9 @@ def main():
         )
         print_table(results, title=f"Results ({mode})")
     except Exception as e:
-        print(f"Error during analysis: {e}")
+        print(f"Error during calculation: {e}\n")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

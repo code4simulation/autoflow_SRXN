@@ -1,13 +1,16 @@
 import numpy as np
 from typing import List, Optional, Dict, Union
+from scipy import constants as const
 
-# Physical constants (CODATA 2018)
-kB = 1.380649e-23  # Boltzmann constant [J/K]
-h = 6.62607015e-34 # Planck constant [J·s]
-R = 8.314462618   # Gas constant [J/(mol·K)]
-Na = 6.02214076e23 # Avogadro constant [1/mol]
-c = 299792458     # Speed of light [m/s]
-eV_to_J_mol = 96485.3 # Faraday constant replacement for energy conversion
+# Physical constants (Reference: SciPy Constants / CODATA)
+kB = const.k            # Boltzmann constant [J/K]
+h = const.h             # Planck constant [J·s]
+R = const.R             # Gas constant [J/(mol·K)]
+Na = const.Avogadro     # Avogadro constant [1/mol]
+c = const.c             # Speed of light [m/s]
+eV_to_J_mol = const.e * const.Avogadro  # Conversion factor: eV to J/mol
+amu_to_kg = const.atomic_mass   # 1 amu in kg
+ang_to_m = const.angstrom       # 1 Angstrom in m
 
 def thz_to_cm1(thz: float) -> float:
     """Convert THz to cm^-1."""
