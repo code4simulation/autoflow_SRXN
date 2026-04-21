@@ -13,7 +13,10 @@ dependencies = [
     "matplotlib",
     "pandas",
     "tqdm",
-    "pyyaml"
+    "pyyaml",
+    "phonopy",
+    "spglib",
+    "seekpath"
 ]
 
 [project.optional-dependencies]
