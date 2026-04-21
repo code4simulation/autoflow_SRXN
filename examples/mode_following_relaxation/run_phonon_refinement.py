@@ -38,9 +38,10 @@ def run_enhanced_phonon_refinement(config_path='config.yaml', displacement=None)
     atoms.center()
     
     # 4. Perform Initial Relaxation
-    logger.info("Performing initial relaxation with MACE (ultra-tight CG+FIRE)...")
-    target_fmax = vib_cfg.get('fmax', 0.001)
-    engine.relax(atoms, fmax=target_fmax, optimizer='CG_FIRE')
+    logger.info(f"Performing initial relaxation with {config['potentials']['model_type']} (ultra-tight CG+FIRE)...")
+    target_fmax = config['potentials'].get('fmax', 0.001)
+    target_steps = config['potentials'].get('steps', 200)
+    engine.relax(current_atoms, fmax=target_fmax, steps=target_steps, optimizer='CG_FIRE')
     
     # 5. Iterative Stability Loop with Adaptive Control
     max_iter = vib_cfg.get('max_iter', 10)
@@ -121,8 +122,13 @@ def run_enhanced_phonon_refinement(config_path='config.yaml', displacement=None)
         iter_cfg['perturbation']['alpha'] = current_alpha
         
         follower = MultiModeFollower(engine, config=iter_cfg)
-        # Use tighter fmax and CG_FIRE for refinement cycles
-        current_atoms = follower.optimize(current_atoms, fmax=target_fmax, optimizer='CG_FIRE')
+        # Use unified fmax and steps for refinement
+        current_atoms = follower.optimize(
+            current_atoms, 
+            fmax=target_fmax, 
+            steps=target_steps,
+            optimizer='CG_FIRE'
+        )
 
     # 6. Final Summary
     logger.info(f"\n{'='*20} REFINEMENT SUMMARY (u={u}) {'='*20}")

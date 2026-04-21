@@ -9,11 +9,10 @@ paths:
 potentials:
   model_type: "mace0"  # Using MACE-MP-0 foundation model
   device: "cpu"        # Set to "cuda" if GPU is available
-  fmax: 0.05
+  fmax: 0.001
   steps: 200
 
 vibrational_analysis:
-  fmax: 0.001                       # Ultra-tight threshold for phonon calculations
   max_iter: 10                      # Increased cycles for thorough refinement
   stability_threshold: -0.1         # Goal: All modes above this frequency (THz)
   phonopy_displacement: 0.01        # Default finite difference displacement (A)
