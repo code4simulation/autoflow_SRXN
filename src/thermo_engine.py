@@ -1,0 +1,128 @@
+import numpy as np
+from typing import List, Optional, Dict, Union
+
+# Physical constants (CODATA 2018)
+kB = 1.380649e-23  # Boltzmann constant [J/K]
+h = 6.62607015e-34 # Planck constant [J·s]
+R = 8.314462618   # Gas constant [J/(mol·K)]
+Na = 6.02214076e23 # Avogadro constant [1/mol]
+c = 299792458     # Speed of light [m/s]
+eV_to_J_mol = 96485.3 # Faraday constant replacement for energy conversion
+
+def thz_to_cm1(thz: float) -> float:
+    """Convert THz to cm^-1."""
+    return thz * 1e12 / (c * 100)
+
+def thz_to_joule(thz: float) -> float:
+    """Convert THz to Joules."""
+    return h * thz * 1e12
+
+class ThermoCalculator:
+    """
+    Core engine for vibrational thermochemistry using the Harmonic Oscillator approximation.
+    """
+    def __init__(self, frequencies_thz: List[float]):
+        """
+        Args:
+            frequencies_thz: List of vibrational frequencies in THz. 
+                            Zero and imaginary modes are automatically filtered out.
+        """
+        self.freqs = np.array([f for f in frequencies_thz if f > 0])
+        
+    def calculate_zpe(self) -> float:
+        """
+        Calculates Zero Point Energy (ZPE) in J/mol.
+        
+        Physics: E_zpe = sum(0.5 * h * nu)
+        """
+        zpe = 0.5 * np.sum(h * self.freqs * 1e12) * Na
+        return zpe
+
+    def calculate_vib_internal_energy(self, T: float) -> float:
+        """
+        Calculates thermal vibrational internal energy U_vib(T) in J/mol.
+        """
+        if T < 1e-6:
+            return 0.0
+        
+        hv = h * self.freqs * 1e12
+        exp_factor = np.exp(hv / (kB * T))
+        u_vib = np.sum(hv / (exp_factor - 1)) * Na
+        return u_vib
+
+    def calculate_vib_entropy(self, T: float) -> float:
+        """
+        Calculates vibrational entropy S_vib(T) in J/(mol·K).
+        """
+        if T < 1e-6:
+            return 0.0
+        
+        hv = h * self.freqs * 1e12
+        x = hv / (kB * T)
+        # Avoid log(0) for high frequencies via small epsilon
+        s_vib = R * np.sum(x / (np.exp(x) - 1) - np.log(1 - np.exp(-x) + 1e-16))
+        return s_vib
+
+    def calculate_vib_free_energy(self, T: float) -> float:
+        """
+        Calculates vibrational Helmholtz free energy F_vib(T) in J/mol.
+        Includes ZPE.
+        """
+        zpe = self.calculate_zpe()
+        u_vib = self.calculate_vib_internal_energy(T)
+        s_vib = self.calculate_vib_entropy(T)
+        return zpe + u_vib - T * s_vib
+
+class GasThermo:
+    """
+    Statistical mechanics utilities for ideal gas translational and rotational contributions.
+    """
+    @staticmethod
+    def calculate_enthalpy_correction(T: float, symmetry: str = 'nonlinear') -> float:
+        """
+        Calculates the (H_trans + H_rot) contribution to the gas-phase enthalpy.
+        
+        For non-linear: 2.5RT (trans) + 1.5RT (rot) = 4.0RT
+        For linear: 2.5RT (trans) + 1.0RT (rot) = 3.5RT
+        """
+        coeff = 3.5 if symmetry == 'linear' else 4.0
+        return coeff * R * T
+
+    @staticmethod
+    def calculate_trans_entropy(mass_amu: float, T: float, P: float = 101325.0) -> float:
+        """
+        Calculates translational entropy using the Sackur-Tetrode equation.
+        
+        Args:
+            mass_amu: Molecular mass in amu.
+            T: Temperature in K.
+            P: Pressure in Pa (default 1 atm).
+        """
+        M = mass_amu * 1.660539e-27 # Convert to kg
+        prefactor = (2 * np.pi * M * kB * T / (h**2))**1.5
+        s_trans = R * (np.log(prefactor * kB * T / P) + 2.5)
+        return s_trans
+
+    @staticmethod
+    def calculate_rot_entropy(moments_amu_ang2: List[float], T: float, sigma: int, symmetry: str = 'nonlinear') -> float:
+        """
+        Calculates rotational entropy.
+        
+        Args:
+            moments_amu_ang2: Moments of inertia [I1, I2, I3] in amu*A^2.
+            T: Temperature in K.
+            sigma: Symmetry number.
+            symmetry: 'linear' or 'nonlinear'.
+        """
+        conv = 1.660539e-27 * (1e-10**2) # amu*A^2 to kg*m^2
+        I = [m * conv for m in moments_amu_ang2]
+        
+        if symmetry == 'linear':
+            s_rot = R * (np.log(8 * np.pi**2 * I[0] * kB * T / (sigma * h**2)) + 1)
+        else:
+            product_I = np.prod(I)
+            term1 = np.sqrt(np.pi) / sigma
+            term2 = (8 * np.pi**2 * kB * T / (h**2))**1.5
+            s_rot = R * (np.log(term1 * term2 * np.sqrt(product_I)) + 1.5)
+            
+        return s_rot
