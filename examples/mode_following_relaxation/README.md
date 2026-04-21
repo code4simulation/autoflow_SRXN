@@ -34,8 +34,8 @@ To ensure the system reaches the deepest part of the local potential well, we im
 
 ### C. Mode-Following Perturbation
 For each identified imaginary mode with $\nu < -0.1 \text{ THz}$, the atomic positions $\mathbf{R}$ are updated:
-$$\mathbf{R}_{new} = \mathbf{R}_{old} + \alpha \cdot \mathbf{e}_{imag}$$
-where $\alpha$ is the perturbation scale (initially $0.1$ Å) and $\mathbf{e}_{imag}$ is the normalized eigenvector of the unstable mode.
+$$\mathbf{R}_{\text{new}} = \mathbf{R}_{\text{old}} + \alpha \cdot \mathbf{e}_{\text{imag}}$$
+where $\alpha$ is the perturbation scale (initially $0.1$ Å) and $\mathbf{e}_{\text{imag}}$ is the normalized eigenvector of the unstable mode.
 
 ## 3. Simulation Results and Analysis
 
