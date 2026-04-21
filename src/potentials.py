@@ -6,21 +6,26 @@ from ase.optimize import BFGS, FIRE
 from ase.optimize.sciopt import SciPyFminCG
 from ase.calculators.emt import EMT
 from ase.io import write, read
+from ase.data import atomic_numbers, atomic_masses
 
 class LammpsMLIAPEngine:
     """
     Interface for calling an external LAMMPS binary with ML-IAP (SevenNet/MACE) 
     and custom D3 dispersion overlay.
     """
-    def __init__(self, binary_path, model_path, potential_type='sevennet', d3_params=None):
+    def __init__(self, binary_path, model_path, potential_type='sevennet', d3_params=None, parallel=False, nmpl=1):
         self.binary_path = binary_path
         self.model_path = model_path
         self.potential_type = potential_type.lower()
         self.d3_params = d3_params # Dict: {'s6': 9000, 's8': 1600, 'damping': 'damp_bj', 'functional': 'pbe'}
+        self.parallel = parallel
+        self.nmpl = nmpl
         
     def _create_input_script(self, atoms, input_file, data_file, log_file):
         """Generates LAMMPS input script for ML-IAP + D3 overlay."""
-        species = list(set(atoms.get_chemical_symbols()))
+        # Species must be sorted by atomic number for consistent LAMMPS typing if required,
+        # but primarily to match the user's provided logic for SevenNet.
+        species = sorted(list(set(atoms.get_chemical_symbols())), key=lambda x: atomic_numbers[x])
         species_str = " ".join(species)
         
         # Determine atom_style (full is safer for molecular systems)
@@ -37,15 +42,37 @@ class LammpsMLIAPEngine:
             ""
         ]
         
-        if self.d3_params:
-            # SevenNet custom d3 style: pair_style hybrid/overlay mliap unified {model} 0 d3 {s6} {s8} {damp} {func}
-            d3 = self.d3_params
-            lines.append(f"pair_style hybrid/overlay mliap unified {self.model_path} 0 d3 {d3['s6']} {d3['s8']} {d3['damping']} {d3['functional']}")
-            lines.append(f"pair_coeff * * mliap SevenNet {species_str}")
-            lines.append(f"pair_coeff * * d3 {species_str}")
-        else:
+        # Add mass definitions
+        for idx, elem in enumerate(species):
+            mass = atomic_masses[atomic_numbers[elem]]
+            lines.append(f"mass {idx+1} {mass:.4f}")
+        lines.append("")
+
+        if self.potential_type == 'sevennet':
+            if not self.parallel:
+                lines.append(f"pair_style e3gnn")
+                lines.append(f"pair_coeff * * {self.model_path} {species_str}")
+            else:
+                lines.append(f"pair_style e3gnn/parallel")
+                lines.append(f"pair_coeff * * {self.nmpl} {self.model_path} {species_str}")
+        elif self.potential_type == 'mace':
+            # Keep existing logic or update if MACE also needs special handling.
+            # Assuming mliap unified was previously used for MACE-like interfaces
             lines.append(f"pair_style mliap unified {self.model_path} 0")
-            lines.append(f"pair_coeff * * SevenNet {species_str}")
+            lines.append(f"pair_coeff * * MACE {species_str}")
+        else:
+            # Fallback
+            lines.append(f"pair_style mliap unified {self.model_path} 0")
+            lines.append(f"pair_coeff * * {self.potential_type} {species_str}")
+
+        if self.d3_params:
+            # Note: hybrid/overlay logic for e3gnn would need careful handling.
+            # Currently assuming the user's snippet is the priority for the base style.
+            # If d3 is needed as overlay:
+            d3 = self.d3_params
+            lines.insert(-2, f"pair_style hybrid/overlay {lines.pop(-2)}") # wrap existing style
+            lines.append(f"pair_style d3 {d3['s6']} {d3['s8']} {d3['damping']} {d3['functional']}")
+            lines.append(f"pair_coeff * * d3 {species_str}")
             
         lines.extend([
             "",
