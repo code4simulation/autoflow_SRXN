@@ -243,7 +243,8 @@ def identify_protectors(atoms, config, verbose=False):
     Enhanced with element-based filtering for robust identification in Case B.
     """
     import numpy as np
-    protector_cfg = config.get('adsorbate_generation', config.get('protector', {}))
+    # Priority: config['protector'] > config['adsorbate_generation']['protector'] > default
+    protector_cfg = config.get('protector', config.get('adsorbate_generation', {}).get('protector', config.get('adsorbate_generation', {})))
     
     heuristic = protector_cfg.get('heuristic', 'graph')
     inhibitor_elements = protector_cfg.get('inhibitor_elements', [])
