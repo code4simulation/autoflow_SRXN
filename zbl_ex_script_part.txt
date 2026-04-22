@@ -1,3 +1,5 @@
+pair_style       hybrid/overlay  e3gnn/parallel  zbl/pair
+
 pair_coeff         * * e3gnn/parallel ${NMPL} ${POT} H O Si
 
 pair_coeff      1 1     zbl/pair 1 1    0.5249 0.6749
