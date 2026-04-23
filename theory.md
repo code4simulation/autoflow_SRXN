@@ -56,6 +56,7 @@ $$v = \nu [X^{\ddagger}]$$
 $$v = \nu \cdot \left( [A][B] \frac{q_{RC} Q'_{rest}}{Q_A Q_B} \exp\left(-\frac{\Delta E_0^{\ddagger}}{k_B T}\right) \right)$$
 
 여기에 $q_{RC} \approx \frac{k_B T}{h\nu}$를 대입하면 놀랍게도 $\nu$가 상쇄됩니다:
+
 $$v = \nu \cdot \frac{k_B T}{h\nu} \cdot \frac{Q'_{rest}}{Q_A Q_B} \exp\left(-\frac{\Delta E_0^{\ddagger}}{k_B T}\right) [A][B]$$
 $$v = \frac{k_B T}{h} \frac{Q'_{rest}}{Q_A Q_B} \exp\left(-\frac{\Delta E_0^{\ddagger}}{k_B T}\right) [A][B]$$
 
