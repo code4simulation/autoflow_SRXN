@@ -40,24 +40,74 @@ paths:
 # -----------------------------------------------------------------------------
 engine:
   potential:
-    backend:  "mace"      # "mace" | "sevennet" | "emt"
-                          #   mace     — via mace_mp (in-process ASE calculator)
-                          #   sevennet — via SevenNetCalculator / SevenNetD3Calculator (ASE)
-                          #   emt      — ASE EMT (testing/demo only)
-    device:   "cpu"       # "cpu" | "cuda"  (ASE backend only)
-    dtype:    "float64"   # "float32" | "float64"  (ASE MACE only)
-                          #   float32: faster, suited for MD
-                          #   float64: more precise, suited for relaxation and vibrations
+    # Choice of machine learning interatomic potential (ML-IAP) backend.
+    # Supported:
+    #   - "mace":     MACE-MP equivariant foundation model. Excellent for general
+    #                 crystalline materials and small molecule interactions.
+    #   - "sevennet": SevenNet foundation model. Specifically robust for surface 
+    #                 catalysis and complex chemical environments.
+    #   - "emt":      Effective Medium Theory (built-in to ASE). Extremely fast 
+    #                 but lacks chemical accuracy for modern surface modeling.
+    #                 Recommended for testing workflow connectivity only.
+    backend:  "mace"
 
-    model:  null        # Model name or path. null → backend default.
-                        #   mace:     null → mace-mp "medium"
-                        #   sevennet: null → "7net-0"
-    modal:  null        # Modality for multi-fidelity SevenNet models (e.g., "mpa", "omat24").
-    d3:     false       # D3 dispersion correction (SevenNet only, via SevenNetD3Calculator)
+    # Hardware device for PyTorch-based potentials.
+    # Use "cuda" for GPU acceleration (requires NVIDIA driver + CUDA Toolkit).
+    # Use "cpu" if no GPU is available or for very small systems.
+    device:   "cpu"
 
-    # SevenNet Accelerators (requires specific hardware/environment)
-    enable_cueq:  false # Enable cuEquivariance acceleration (SevenNet only)
-    enable_flash: false # Enable FlashAttention/FlashTP acceleration (SevenNet only)
+    # Model identifier or local file path.
+    #   - For MACE: null defaults to the 'medium' version of mace-mp-0.
+    #               Set to 'large' or a local path for custom models.
+    #   - For SevenNet: null defaults to '7net-0'. 
+    #                   Supports built-in keywords (e.g. '7net-omat24')
+    #                   or local file paths (e.g. 'checkpoints/my_model.pth').
+    model:    null
+
+    # --- MACE-Specific Parameters ---
+    # Floating point precision for Torch calculations.
+    #   - "float32": Faster and memory-efficient. Best for long-time MD simulations.
+    #   - "float64": High precision (Double Precision). Essential for numerical 
+    #                 stabilities during Geometry Optimization and Vibrational Analysis.
+    dtype:    "float64"
+
+    # --- SevenNet-Specific Parameters ---
+    # Modality for multi-fidelity or specialized SevenNet models.
+    # Required for models like OMPA or OMAT which have multiple architectural modes.
+    # Examples: "mpa" (Multi-fidelity Potential), "omat24".
+    modal:    null
+
+    # D3 (Grimme) Dispersion Correction.
+    # Enables empirical van der Waals (vdW) corrections to long-range interactions.
+    # Note: Only supported when 'backend' is "sevennet". 
+    # Internally, the engine will use SevenNetD3Calculator.
+    # 
+    # Usage Example:
+    #   backend: "sevennet"
+    #   d3: true
+    d3:       false
+    
+    # Advanced Hardware Accelerators (requires specific SevenNet installations).
+    #   - enable_cueq:  Uses cuEquivariance library for 2x-5x faster tensor ops.
+    #   - enable_flash: Uses FlashAttention to reduce memory footprint.
+    enable_cueq:  false
+    enable_flash: false
+
+    # -------------------------------------------------------------------------
+    # QUICK CONFIG EXAMPLES:
+    #
+    # [EXAMPLE 1: High-Precision MACE Optimization]
+    #   backend: "mace", device: "cuda", dtype: "float64"
+    #
+    # [EXAMPLE 2: SevenNet with Dispersion for Weakly Bound Physisorption]
+    #   backend: "sevennet", device: "cuda", d3: true
+    #
+    # [EXAMPLE 3: Custom Pre-trained SevenNet with Modality]
+    #   backend: "sevennet", model: "7net-omat24", modal: "mpa"
+    #
+    # [EXAMPLE 4: Loading Local Checkpoint]
+    #   backend: "sevennet", model: "./models/finetuned_checkpoint.pth"
+    # -------------------------------------------------------------------------
 
   # Default geometry optimization settings.
   # Inherited by surface_prep.slab_relaxation and reaction_search.candidate_relaxation.
@@ -80,7 +130,6 @@ engine:
   # Override in the stage block only when different conditions are needed.
   md:
     temperature_K: 500     # Thermostat temperature (K)
-    timestep:      1.0     # Integration timestep (fs). Alias for timestep_fs.
     timestep_fs:   1.0     # Integration timestep (fs). 1 fs is safe for most systems.
     md_steps:      2000    # Total integration steps. Wall time ≈ md_steps × timestep_fs fs.
     damping:       100.0   # Langevin friction timescale (fs)

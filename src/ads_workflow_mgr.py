@@ -286,7 +286,7 @@ class AdsorptionWorkflowManager:
         _protex = conf.get('reaction_search', {}).get('mechanisms', {}).get(
             'protector_exchange', conf.get('protector', {}))
         if conf and _protex.get('enabled', False):
-            sub_idx, prot_idx = identify_protectors(self.slab, config, verbose=self.verbose)
+            sub_idx, prot_idx = identify_protectors(self.slab, conf, verbose=self.verbose)
             grid_res = _protex.get('cavity_grid_ang', _protex.get('grid_resolution', 0.2))
             detector = CavityDetector(self.slab, sub_idx, prot_idx, grid_res=grid_res, verbose=self.verbose)
             target_centers = detector.find_void_centers(top_clearance=height)

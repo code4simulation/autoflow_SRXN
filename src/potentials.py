@@ -56,7 +56,15 @@ class SimulationEngine:
 
         elif self.backend == 'sevennet':
             try:
+                import os
                 model = self.model or '7net-0'
+                
+                # Check if model is a local checkpoint file
+                is_checkpoint = isinstance(model, str) and model.endswith('.pth')
+                if is_checkpoint and os.path.isfile(model):
+                    model = os.path.abspath(model)
+                    logger.info(f"  [Engine] Detected local SevenNet checkpoint: {model}")
+
                 kwargs = {
                     'model': model,
                     'device': self.device,
@@ -64,14 +72,15 @@ class SimulationEngine:
                     'enable_cueq': self.enable_cueq,
                     'enable_flash': self.enable_flash
                 }
+                
                 if self.d3:
                     from sevenn.calculator import SevenNetD3Calculator
                     self._calculator = SevenNetD3Calculator(**kwargs)
-                    logger.info(f"  [Engine] Loaded SevenNet+D3 calculator (model={model}, modal={self.modal}).")
+                    logger.info(f"  [Engine] Loaded SevenNet+D3 (model={model}, modal={self.modal}).")
                 else:
                     from sevenn.calculator import SevenNetCalculator
                     self._calculator = SevenNetCalculator(**kwargs)
-                    logger.info(f"  [Engine] Loaded SevenNet calculator (model={model}, modal={self.modal}).")
+                    logger.info(f"  [Engine] Loaded SevenNet (model={model}, modal={self.modal}).")
             except ImportError:
                 logger.warning("  [Engine] SevenNet (sevenn) not installed. Falling back to EMT.")
                 self._calculator = EMT()
@@ -173,9 +182,7 @@ class SimulationEngine:
         md_steps    = md_steps    if md_steps    is not None else md_cfg.get('md_steps', 1000)
         damping     = damping     if damping     is not None else md_cfg.get('damping', 100.0)
         
-        # Support both 'timestep' and 'timestep_fs' keys
-        if timestep_fs is None:
-            timestep_fs = md_cfg.get('timestep')
+        # Get timestep (fs)
         if timestep_fs is None:
             timestep_fs = md_cfg.get('timestep_fs', 1.0)
 
