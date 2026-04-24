@@ -10,3 +10,11 @@ __pycache__/
 *surface_*.extxyz
 *.log
 *.tmp
+
+# User Exclusions
+.claude/
+cache*.json
+**/cache*.json
+qpoints.yaml
+theory.md
+todolist.md
