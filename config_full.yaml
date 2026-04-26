@@ -22,12 +22,12 @@
 # I/O — single source of truth for all file references
 # -----------------------------------------------------------------------------
 paths:
-  substrate_bulk:  "../../structures/SiO2_mp-546794.vasp"  # Bulk crystal (VASP). Used for slab generation.
-  substrate_slab:  null                                      # Pre-built slab. When set, slab_generation is skipped.
-  adsorbate:       "../../structures/DIPAS.vasp"             # Precursor / adsorbate molecule.
-  inhibitor:       null                                      # Inhibitor molecule for 2-step ALD workflows.
-  output_dir:      "results"
-  output_prefix:   "results"
+  substrate_bulk:  "structures/SiO2_mp-546794.vasp"  # Bulk crystal (VASP). Used for slab generation.
+  substrate_slab:  null                                # Pre-built slab. When set, slab_generation is skipped.
+  adsorbate:       "structures/DIPAS.vasp"               # Precursor / adsorbate molecule.
+  inhibitor:       null                                # Inhibitor molecule for 2-step ALD workflows.
+  output_dir:      "results"                           # Base directory for all generated outputs.
+  output_prefix:   "results"                           # Prefix for output file naming.
 
 
 # -----------------------------------------------------------------------------
@@ -58,13 +58,13 @@ engine:
 
     # Model identifier or local file path.
     #   - For MACE: null defaults to the 'medium' version of mace-mp-0.
-    #               Set to 'large' or a local path for custom models.
+    #               Set to 'small' for faster testing or a local path.
     #   - For SevenNet: null defaults to '7net-0'. 
     #                   Supports built-in keywords (e.g. '7net-omat24')
     #                   or local file paths (e.g. 'checkpoints/my_model.pth').
     model:    null
 
-    # --- MACE-Specific Parameters ---
+    # --- Precision and Performance ---
     # Floating point precision for Torch calculations.
     #   - "float32": Faster and memory-efficient. Best for long-time MD simulations.
     #   - "float64": High precision (Double Precision). Essential for numerical 
@@ -80,11 +80,6 @@ engine:
     # D3 (Grimme) Dispersion Correction.
     # Enables empirical van der Waals (vdW) corrections to long-range interactions.
     # Note: Only supported when 'backend' is "sevennet". 
-    # Internally, the engine will use SevenNetD3Calculator.
-    # 
-    # Usage Example:
-    #   backend: "sevennet"
-    #   d3: true
     d3:       false
     
     # Advanced Hardware Accelerators (requires specific SevenNet installations).
@@ -93,65 +88,35 @@ engine:
     enable_cueq:  false
     enable_flash: false
 
-    # -------------------------------------------------------------------------
-    # QUICK CONFIG EXAMPLES:
-    #
-    # [EXAMPLE 1: High-Precision MACE Optimization]
-    #   backend: "mace", device: "cuda", dtype: "float64"
-    #
-    # [EXAMPLE 2: SevenNet with Dispersion for Weakly Bound Physisorption]
-    #   backend: "sevennet", device: "cuda", d3: true
-    #
-    # [EXAMPLE 3: Custom Pre-trained SevenNet with Modality]
-    #   backend: "sevennet", model: "7net-omat24", modal: "mpa"
-    #
-    # [EXAMPLE 4: Loading Local Checkpoint]
-    #   backend: "sevennet", model: "./models/finetuned_checkpoint.pth"
-    # -------------------------------------------------------------------------
-
   # Default geometry optimization settings.
   # Inherited by surface_prep.slab_relaxation and reaction_search.candidate_relaxation.
-  # Override per-stage only when different convergence is needed.
   relaxation:
-    fmax:      0.05    # Max-force convergence criterion (eV/Å)
-    steps:     200     # Max optimization steps
+    fmax:      0.05    # Max-force convergence criterion (eV/Å). Recommended: 0.05 (coarse), 0.01 (tight).
+    steps:     200     # Max optimization steps.
     optimizer: "BFGS"  # "BFGS" | "FIRE" | "CG_FIRE"
                        #   CG_FIRE: two-stage, SciPyFminCG then FIRE
 
-    # Atom-freezing constraints applied during every relax() call that reads this block.
+    # Atom-freezing constraints applied during every relax() call.
     # Merged additively with any FixAtoms constraints already set on the atoms object.
-    # null → no additional constraint is applied (recommended for gas-phase relaxations).
+    # null → no additional constraint is applied.
     frozen_z_ang:     null   # Fix atoms whose z < z_min(atoms) + this value (Å).
     fix_atom_indices: null   # Fix atoms by explicit index list, e.g. [0, 1, 2, 100].
-                             # Combined with frozen_z_ang when both are non-null.
 
   # Default NVT molecular dynamics settings.
   # Inherited by surface_prep.equilibration.
-  # Override in the stage block only when different conditions are needed.
   md:
-    temperature_K: 500     # Thermostat temperature (K)
+    temperature_K: 500     # Thermostat temperature (K).
     timestep_fs:   1.0     # Integration timestep (fs). 1 fs is safe for most systems.
-    md_steps:      2000    # Total integration steps. Wall time ≈ md_steps × timestep_fs fs.
-    damping:       100.0   # Langevin friction timescale (fs)
+    md_steps:      2000    # Total integration steps.
+    damping:       100.0   # Langevin friction timescale (fs).
 
-    # Atom-freezing constraints (same semantics as engine.relaxation above):
-    # These serve as engine-wide defaults if not overridden in Stage 1/2.
+    # Atom-freezing constraints (same semantics as engine.relaxation above).
     frozen_z_ang:     null
     fix_atom_indices: null
 
 
 # -----------------------------------------------------------------------------
 # Stage 1 — Surface Preparation
-#
-# Sub-steps and their potential dependency:
-#   slab_generation  — geometry only, no potential
-#   passivation      — geometry only, no potential
-#   surface_analysis — geometry only, no potential (symmetry + valence rules)
-#   slab_relaxation  — [REQUIRES POTENTIAL]  inherits engine.relaxation
-#   equilibration    — [REQUIRES POTENTIAL]  inherits engine.md
-#
-# To run stages 1 and 2 as pure geometry pipelines (e.g., for structure screening),
-# set slab_relaxation.enabled: false and equilibration.enabled: false.
 # -----------------------------------------------------------------------------
 surface_prep:
 
@@ -187,32 +152,14 @@ surface_prep:
   slab_relaxation:               # [REQUIRES POTENTIAL]
     enabled: true
     # Inherits engine.relaxation by default.
-    # Uncomment to override for this stage only:
-    # fmax:      0.05
-    # steps:     200
-    # optimizer: "BFGS"
 
   equilibration:                 # [REQUIRES POTENTIAL]
     enabled:      true
-    frozen_z_ang: 5.5    # Stage-specific override: freeze atoms whose z < z_min(slab) + this value (Å).
-                         # Overrides engine.md.frozen_z_ang for this stage only.
-    # Inherits engine.md defaults. Uncomment to override for this stage only:
-    # temperature_K: 500
-    # timestep_fs:   1.0
-    # md_steps:      2000
-    # damping:       100.0
+    frozen_z_ang: 5.5    # Fix the bottom part of the slab during MD to simulate bulk substrate.
 
 
 # -----------------------------------------------------------------------------
 # Stage 2 — Reaction Search
-#
-# Sub-steps and their potential dependency:
-#   mechanisms       — geometry only, no potential (placement + overlap check)
-#   candidate_filter — geometry only, no potential (symmetry deduplication)
-#   candidate_relaxation — [REQUIRES POTENTIAL]  inherits engine.relaxation
-#
-# Candidate generation (mechanisms) can be run without a potential to produce
-# a ranked list of starting geometries for external optimization.
 # -----------------------------------------------------------------------------
 reaction_search:
 
@@ -248,70 +195,71 @@ reaction_search:
 
   candidate_relaxation:          # [REQUIRES POTENTIAL]
     enabled: true
-    # Inherits engine.relaxation by default.
-    # Uncomment to use coarser convergence for faster screening:
+    # Recommended coarse screening:
     # fmax:  0.1
     # steps: 100
 
 
 # -----------------------------------------------------------------------------
 # Stage 3 — Analysis
-#
-# Sub-steps and their potential dependency:
-#   vibrational               — [REQUIRES POTENTIAL]  (Hessian via finite differences)
-#   vibrational.mode_refinement — [REQUIRES POTENTIAL]  (relaxation + displacement)
-#   thermochemistry           — geometry + frequencies only, no potential
 # -----------------------------------------------------------------------------
 analysis:
 
   # ── Potential-required ─────────────────────────────────────────────────────
 
   vibrational:                   # [REQUIRES POTENTIAL]
-    displacement_ang:  0.01      # Finite-difference step for Hessian construction (Å)
-    phva_radius_ang:   12.0      # PHVA active region: include substrate atoms within this radius of adsorbate (Å)
+    displacement_ang:  0.01      # Finite-difference step for Hessian construction (Å).
+    
+    # --- PHVA (Partial Hessian Vibrational Analysis) Logic ---
+    # The analyzer intelligently decides the calculation scope based on these params:
+    # 1. If both are null -> FHVA (Full Hessian, all atoms active).
+    # 2. If phva_radius_ang is set -> Include adsorbate + substrate atoms within radius (Å).
+    # 3. If frozen_z_ang is set -> Exclude bottom substrate atoms below z_min + threshold (Å).
+    #    This is particularly useful to remove noisy imaginary modes from fixed slab parts.
+    phva_radius_ang:   6.0       # Neighborhood radius around adsorbate (Å).
+    frozen_z_ang:      3.0       # Exclude atoms below this relative height (Å).
+    
+    # Control displacement cache behavior:
+    # true  -> Re-calculate all displacements (deletes existing cache).
+    # false -> Resume from existing cache if available (fast restart).
+    overwrite:         true
 
-    # Path to the phonopy qpoints.yaml consumed by MultiModeFollower.
-    # Usage:
-    #   null              → VibrationalAnalyzer.generate_qpoints_file() writes "qpoints.yaml"
-    #                       to the working directory; MultiModeFollower reads that file.
-    #   "path/to/f.yaml"  → Use this specific pre-existing file directly.
-    # 
-    # IMPORTANT: Use a file-path string or null. Do NOT use boolean (True/False).
+    # phonopy-compatible output:
+    # null -> Automatically writes "qpoints.yaml" to the result directory.
+    # "path/to/f.yaml" -> Use specific file for following steps.
     qpoints_file:      null
 
     mode_refinement:             # [REQUIRES POTENTIAL]
+      # Advanced stability refinement using linear combination of imaginary modes.
       enabled:            true
       max_iter:           10
-      freq_threshold_thz: -0.1   # Follow modes with frequency below this value (THz)
-      max_modes:          3      # Max simultaneous modes to follow
-      perturbation_alpha: 0.1    # Displacement magnitude along eigenvector (Å)
-      max_displacement:   0.3    # Per-atom displacement safety cap (Å)
-      stagnation_factor:  0.5    # Multiply alpha by this factor when improvement stalls
-      stagnation_epsilon: 0.05   # Min frequency improvement to avoid stagnation trigger (THz)
+      freq_threshold_thz: -0.1   # Follow modes with frequency below this value (THz).
+      max_modes:          3      # Max simultaneous modes to follow.
+      perturbation_alpha: 0.1    # Displacement magnitude along eigenvector (Å).
+      max_displacement:   0.3    # Per-atom displacement safety cap (Å).
+      
       # Tighter relaxation than engine.relaxation — explicitly overridden here:
-      fmax:  0.001               # eV/Å  (engine default is 0.05)
+      fmax:  0.005               # eV/Å. High precision required for mode following.
       steps: 500
 
     visualization:
+      # Generate animation frames (extxyz) for the relaxation pathway.
       enabled:    true
       n_frames:   10
-      output_dir: "mode_anims"
-
-    symmetry:
-      enabled: true
-      symprec: 1.0e-4
+      output_traj: "relaxation.extxyz"
 
   # ── No potential required ──────────────────────────────────────────────────
 
   thermochemistry:
+    # Calculation of Gibbs free energies and ZPE.
     temperatures_K: [298.15, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0]
 
     gas:
-      # mass, moments of inertia, and σ are all auto-derived from paths.adsorbate
-      # via spglib point-group analysis. Override only if detection is wrong:
-      # mass:    null
-      # moments: null
-      # sigma:   1
+      # Auto-derived via spglib point-group analysis from paths.adsorbate.
+      mass:    null
+      moments: null
+      sigma:   null
 
     adsorbent:
-      electronic_energy: 0.0    # Reference electronic energy (eV), from MLIP single-point.
+      # Reference electronic energy (eV), usually from MLIP single-point.
+      electronic_energy: 0.0
