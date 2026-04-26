@@ -193,7 +193,7 @@ def _execute_generic_single_site(mgr, molecule, c_idx, ligands, sites, rot_steps
         
         indices_b = l_info['indices']
         frag_b = molecule[indices_b]
-        binding_idx_b = indices_b.index(l_info['binding_atoms'][0])
+        binding_idx_b = [indices_b.index(idx) for idx in l_info['binding_atoms']]
         
         indices_a = list(set(range(len(molecule))) - set(indices_b))
         frag_a = molecule[indices_a]
@@ -208,7 +208,7 @@ def _execute_generic_single_site(mgr, molecule, c_idx, ligands, sites, rot_steps
                 p_a = mgr._place_at_dangling_bond(frag_a, binding_idx_a, l_info['bond_vec'], 
                                                    si_pos, h_vec_norm, 2.35, rot_angle=angle)
                 
-                p_b = mgr._form_byproduct(frag_b, binding_idx_b, -l_info['bond_vec'])
+                p_b = mgr._form_byproduct(frag_b, binding_idx_b[0], -l_info['bond_vec'])
                 z_clearance = np.max(mgr.slab.positions[:, 2]) + 4.0
                 p_b.translate([si_pos[0], si_pos[1], z_clearance] - p_b.positions[0])
                 p_b.center(vacuum=5.0) # Isolate byproduct in vacuum
@@ -247,7 +247,7 @@ def _execute_generic_dissociation(mgr, molecule, c_idx, ligands, pairs, rot_step
         
         indices_b = l_info['indices']
         frag_b = molecule[indices_b]
-        binding_idx_b = indices_b.index(l_info['binding_atoms'][0])
+        binding_idx_b = [indices_b.index(idx) for idx in l_info['binding_atoms']]
         
         indices_a = list(set(range(len(molecule))) - set(indices_b))
         frag_a = molecule[indices_a]
@@ -261,9 +261,15 @@ def _execute_generic_dissociation(mgr, molecule, c_idx, ligands, pairs, rot_step
                     p_a = mgr._place_at_dangling_bond(frag_a, binding_idx_a, l_info['bond_vec'], 
                                                        active_1['pos'], active_1['db_vector'], 2.35, rot_angle=angle)
                     
-                    bond_len_b = 1.48 if frag_b.symbols[binding_idx_b] == 'H' else 2.1
+                    bond_len_b = 2.1
+                    if l_info['hapticity'] == 1 and frag_b.symbols[binding_idx_b[0]] == 'H':
+                        bond_len_b = 1.48
+                    elif l_info['hapticity'] > 1:
+                        bond_len_b = 1.8 
+                        
                     p_b = mgr._place_at_dangling_bond(frag_b, binding_idx_b, -l_info['bond_vec'], 
-                                                       active_2['pos'], active_2['db_vector'], bond_len_b, rot_angle=0)
+                                                       active_2['pos'], active_2['db_vector'], bond_len_b, 
+                                                       rot_angle=0, haptic_normal=l_info.get('normal_vector'))
                     
                     combined = mgr.slab.copy()
                     for a in p_a: a.tag = tag
@@ -273,7 +279,7 @@ def _execute_generic_dissociation(mgr, molecule, c_idx, ligands, pairs, rot_step
                     
                     if not mgr.check_overlap(combined, cutoff=1.2, verbose=mgr.verbose):
                         comp_a = "".join(frag_a.symbols)
-                        combined.info['mechanism'] = f"Generic Chemisorption: {comp_a} on {active_1['index']}, {frag_b.symbols[binding_idx_b]} on {active_2['index']}, tag={tag}, rot={angle:.1f}"
+                        combined.info['mechanism'] = f"Generic Chemisorption: {comp_a} on {active_1['index']}, {frag_b.symbols[binding_idx_b[0]]} on {active_2['index']}, tag={tag}, rot={angle:.1f}"
                         combined.info['reaction_type'] = 'chemisorption'
                         best_pose = combined
                         break
@@ -305,7 +311,7 @@ def _execute_protector_exchange(mgr, molecule, c_idx, ligands, exchange_sites, r
         
         indices_b = l_info['indices']
         frag_b = molecule[indices_b]
-        binding_idx_b = indices_b.index(l_info['binding_atoms'][0])
+        binding_idx_b = [indices_b.index(idx) for idx in l_info['binding_atoms']]
         
         indices_a = list(set(range(len(molecule))) - set(indices_b))
         frag_a = molecule[indices_a]
@@ -323,7 +329,7 @@ def _execute_protector_exchange(mgr, molecule, c_idx, ligands, exchange_sites, r
                 # Create byproduct (ligand from precursor + leaf from protector)
                 byproduct = frag_b.copy()
                 b_len = 1.0 if s['sym'] in ['N', 'O'] else 1.1 if s['sym'] == 'C' else 1.5
-                bp_h_pos = byproduct.positions[binding_idx_b] + (l_info['bond_vec'] / np.linalg.norm(l_info['bond_vec'])) * b_len
+                bp_h_pos = byproduct.positions[binding_idx_b[0]] + (l_info['bond_vec'] / np.linalg.norm(l_info['bond_vec'])) * b_len
                 byproduct += Atoms(s['sym'], positions=[bp_h_pos])
                 byproduct.center(vacuum=5.0) # put in its own cell (isolated gas)
                 

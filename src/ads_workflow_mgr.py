@@ -9,6 +9,7 @@ import spglib
 from itertools import combinations
 from knowledge_engine import chem_kb
 from logger_utils import get_workflow_logger
+from surface_utils import calculate_haptic_vbs, calculate_haptic_normal
 
 class AdsorptionWorkflowManager:
     """
@@ -388,12 +389,23 @@ class AdsorptionWorkflowManager:
                 binding_pos = np.mean(molecule.positions[binding_atoms], axis=0)
                 bond_vec = binding_pos - molecule.positions[c_idx]
                 
+                # Haptic Geometry: VBS and Normal
+                vbs = calculate_haptic_vbs(molecule, binding_atoms)
+                normal = calculate_haptic_normal(molecule, binding_atoms)
+                
+                # Orient normal toward the metal center for consistent alignment logic
+                vec_to_metal = molecule.positions[c_idx] - vbs
+                if np.dot(normal, vec_to_metal) < 0:
+                    normal = -normal
+                
                 ligands.append({
                     'formula': formula,
                     'indices': list(frag_indices),
                     'binding_atoms': binding_atoms,
                     'hapticity': hapticity,
-                    'bond_vec': bond_vec # Vector from center to ligand
+                    'bond_vec': bond_vec, # Vector from center to ligand
+                    'vbs_pos': vbs,
+                    'normal_vector': normal
                 })
 
         if verbose:
@@ -403,18 +415,28 @@ class AdsorptionWorkflowManager:
                 print(f"  - Ligand {i}: {l['formula']} (hapticity={l['hapticity']}), atoms: {l['indices']}")
         return c_idx, ligands
 
-    def _place_at_dangling_bond(self, fragment, binding_idx, internal_bond_vec, target_site_pos, db_vector, bond_length, rot_angle=0):
+    def _place_at_dangling_bond(self, fragment, binding_idx, internal_bond_vec, target_site_pos, db_vector, bond_length, rot_angle=0, haptic_normal=None):
         """Precise placement and rotation of a fragment on a surface site."""
         f = fragment.copy()
-        # db_vector points AWAY from surface. 
-        # internal_bond_vec points AWAY from fragment core. 
-        # To bond, fragment's internal_bond_vec must point TOWARD the surface (-db_vector).
-        f.rotate(internal_bond_vec, -db_vector, center=f.positions[binding_idx])
-        f.rotate(rot_angle, db_vector, center=f.positions[binding_idx])
         
-        # Position binding_idx at target_site_pos + normalized(db_vector) * bond_length
+        # Determine anchor and alignment vector
+        if isinstance(binding_idx, (list, np.ndarray)) and len(binding_idx) > 1:
+            anchor_pos = np.mean(f.positions[binding_idx], axis=0)
+            align_vec = haptic_normal if haptic_normal is not None else internal_bond_vec
+        else:
+            b_idx = binding_idx[0] if isinstance(binding_idx, (list, np.ndarray)) else binding_idx
+            anchor_pos = f.positions[b_idx]
+            align_vec = internal_bond_vec
+
+        # Alignment: align_vec must point TOWARD the surface (-db_vector)
+        # Note: haptic_normal was oriented toward metal in fragmentation, 
+        # so it acts like the bond vector from ligand to metal.
+        f.rotate(align_vec, -db_vector, center=anchor_pos)
+        f.rotate(rot_angle, db_vector, center=anchor_pos)
+        
+        # Position anchor at target_site_pos + normalized(db_vector) * bond_length
         placement_pos = target_site_pos + (db_vector / np.linalg.norm(db_vector)) * bond_length
-        f.translate(placement_pos - f.positions[binding_idx])
+        f.translate(placement_pos - anchor_pos)
         return f
 
     def _form_byproduct(self, fragment, binding_idx, internal_bond_vec):

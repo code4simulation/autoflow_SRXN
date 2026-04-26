@@ -54,6 +54,31 @@ def check_overlap(atoms, cutoff=1.2, verbose=False):
         return True
     return False
 
+def calculate_haptic_vbs(atoms, indices):
+    """
+    Calculates the Virtual Bonding Site (centroid) for a set of atoms.
+    """
+    if not indices: return None
+    return np.mean(atoms.positions[indices], axis=0)
+
+def calculate_haptic_normal(atoms, indices):
+    """
+    Calculates the normal vector for a haptic ligand plane (e.g. Cp).
+    Uses SVD to find the plane of best fit.
+    """
+    if len(indices) < 3:
+        return np.array([0., 0., 1.])
+    
+    pos = atoms.positions[indices]
+    centered = pos - np.mean(pos, axis=0)
+    
+    # SVD: U, S, Vh
+    _, _, vh = np.linalg.svd(centered)
+    
+    # The normal is the eigenvector corresponding to the smallest singular value (last row of Vh)
+    normal = vh[2, :]
+    return normal / np.linalg.norm(normal)
+
 def generate_vsepr_vectors(atoms, idx, neighbor_data=None, num_missing=1, cutoff=2.6):
     """
     Calculate generic dangling bond vectors using VSEPR approximation.
