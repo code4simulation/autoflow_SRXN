@@ -906,3 +906,36 @@ class TSSearcher:
             )
 
         return self.atoms
+
+def calculate_mac(eig_a: np.ndarray, eig_b: np.ndarray) -> float:
+    """
+    Computes the Modal Assurance Criterion (MAC) between two eigenvectors.
+    MAC = |(a^T * b)|^2 / ((a^T * a) * (b^T * b))
+    
+    Physics: MAC measures the degree of consistency between two modal vectors.
+    A value of 1.0 indicates a perfect match.
+    """
+    a = eig_a.flatten()
+    b = eig_b.flatten()
+    # Normalize
+    norm_a = np.dot(a, a)
+    norm_b = np.dot(b, b)
+    if norm_a < 1e-12 or norm_b < 1e-12:
+        return 0.0
+    
+    overlap = np.dot(a, b)
+    return (overlap**2) / (norm_a * norm_b)
+
+def calculate_atomic_participation(eig: np.ndarray, n_atoms: int) -> np.ndarray:
+    """
+    Calculates the normalized displacement contribution per atom.
+    Returns an array of shape (n_atoms,).
+    """
+    mode_3d = eig.reshape(n_atoms, 3)
+    # Sum of squares of x,y,z displacements per atom
+    participation = np.sum(mode_3d**2, axis=1)
+    # Normalize so that sum across all atoms = 1.0
+    total = np.sum(participation)
+    if total < 1e-12:
+        return participation
+    return participation / total

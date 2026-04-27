@@ -40,53 +40,179 @@ paths:
 # -----------------------------------------------------------------------------
 engine:
   potential:
+    # ── Backend ────────────────────────────────────────────────────────────────
     # Choice of machine learning interatomic potential (ML-IAP) backend.
-    # Supported:
-    #   - "mace":     MACE-MP equivariant foundation model. Excellent for general
-    #                 crystalline materials and small molecule interactions.
-    #   - "sevennet": SevenNet foundation model. Specifically robust for surface 
-    #                 catalysis and complex chemical environments.
-    #   - "emt":      Effective Medium Theory (built-in to ASE). Extremely fast 
-    #                 but lacks chemical accuracy for modern surface modeling.
-    #                 Recommended for testing workflow connectivity only.
+    #
+    # "mace"
+    #   MACE-MP equivariant message-passing network.  Trained on the Materials
+    #   Project trajectory database (89 elements).  Strong general-purpose
+    #   baseline for crystalline materials, surfaces, and small molecules.
+    #   Internally uses mace.calculators.mace_mp().
+    #
+    # "sevennet"
+    #   SevenNet (7Net) E(3)-equivariant GNN.  Particularly robust for complex
+    #   surface environments and catalysis workflows.  Driven via
+    #   sevenn.calculator.SevenNetCalculator / SevenNetD3Calculator.
+    #   Requires the 'sevenn' package: pip install sevenn.
+    #
+    # "emt"
+    #   Effective Medium Theory — built directly into ASE.  No external
+    #   package needed, sub-millisecond evaluation.  Only parameterised for
+    #   simple metals (Cu, Ag, Au, Ni, Pd, Pt, Al, C, N, O, H).
+    #   Use exclusively for quick workflow smoke-tests.
     backend:  "mace"
 
-    # Hardware device for PyTorch-based potentials.
-    # Use "cuda" for GPU acceleration (requires NVIDIA driver + CUDA Toolkit).
-    # Use "cpu" if no GPU is available or for very small systems.
+    # ── Hardware ───────────────────────────────────────────────────────────────
+    # PyTorch compute device.
+    # "cpu"  — always available; slower for large systems (> ~200 atoms).
+    # "cuda" — requires an NVIDIA GPU + matching CUDA toolkit; strongly
+    #           recommended for production runs or MD > 10 000 steps.
     device:   "cpu"
 
-    # Model identifier or local file path.
-    #   - For MACE: null defaults to the 'medium' version of mace-mp-0.
-    #               Set to 'small' for faster testing or a local path.
-    #   - For SevenNet: null defaults to '7net-0'. 
-    #                   Supports built-in keywords (e.g. '7net-omat24')
-    #                   or local file paths (e.g. 'checkpoints/my_model.pth').
+    # ── Model checkpoint ───────────────────────────────────────────────────────
+    # Selects which pretrained weights to load.
+    #
+    # MACE options
+    #   null              → "medium-mpa-0" (Materials Project + Alexandria; default)
+    #   "small"           → lighter model, faster but slightly less accurate
+    #   "medium"          → original MACE-MP-0 medium (mace_mp_0)
+    #   "large"           → original MACE-MP-0 large
+    #   "medium-0b3"      → MACE-MP-0b3, improved coverage of organic chemistry
+    #   "/path/model.pt"  → local checkpoint; must be a MACE-compatible .model file
+    #
+    # SevenNet options
+    #   null              → "7net-0" (universal potential for 89 elements)
+    #   "7net-omat24"     → fine-tuned on Open Materials 2024 dataset
+    #   "/path/ckpt.pth"  → local SevenNet checkpoint (.pth)
     model:    null
 
-    # --- Precision and Performance ---
-    # Floating point precision for Torch calculations.
-    #   - "float32": Faster and memory-efficient. Best for long-time MD simulations.
-    #   - "float64": High precision (Double Precision). Essential for numerical 
-    #                 stabilities during Geometry Optimization and Vibrational Analysis.
+    # ── Floating-point precision ───────────────────────────────────────────────
+    # Controls the PyTorch default dtype for MACE and SevenNet.
+    #
+    # "float32"  Faster (≈2× on CPU, ≈4× on GPU), lower memory.
+    #            Sufficient for NVT-MD and coarse geometry screening.
+    #            Typical force error vs float64: < 1 meV/Å.
+    #
+    # "float64"  Double precision.  Required when:
+    #            • Geometry optimisation to tight fmax (< 0.05 eV/Å)
+    #            • Hessian / vibrational-frequency calculations
+    #            • Thermodynamic free-energy comparisons (PHVA / FHVA)
+    #            Numerical second derivatives amplify any single-precision noise.
     dtype:    "float64"
 
-    # --- SevenNet-Specific Parameters ---
-    # Modality for multi-fidelity or specialized SevenNet models.
-    # Required for models like OMPA or OMAT which have multiple architectural modes.
-    # Examples: "mpa" (Multi-fidelity Potential), "omat24".
+    # ── D3 dispersion correction ───────────────────────────────────────────────
+    # Adds Grimme's D3(BJ) empirical van der Waals correction to the potential.
+    # Improves description of physisorption and π–π stacking interactions
+    # that are under-bound by most GGA-based MLIP training sets.
+    #
+    # MACE    — uses TorchDFTD3Calculator (pip install torch-dftd).
+    # SevenNet — uses SevenNetD3Calculator (bundled in sevenn ≥ 0.9).
+    # EMT     — not supported; setting has no effect.
+    #
+    # When to enable:
+    #   Physisorption binding energies, weakly-bound molecular precursors,
+    #   or any system where vdW interactions contribute > 0.1 eV.
+    d3:       false
+
+    # ── SevenNet-specific options ──────────────────────────────────────────────
+    # modal
+    #   Selects the fidelity head for multi-head SevenNet models.
+    #   Required for models such as 7net-omat24 (modal: "omat24") or
+    #   multi-property Alexandra models.  Leave null for standard 7net-0.
     modal:    null
 
-    # D3 (Grimme) Dispersion Correction.
-    # Enables empirical van der Waals (vdW) corrections to long-range interactions.
-    # Note: Only supported when 'backend' is "sevennet". 
-    d3:       false
-    
-    # Advanced Hardware Accelerators (requires specific SevenNet installations).
-    #   - enable_cueq:  Uses cuEquivariance library for 2x-5x faster tensor ops.
-    #   - enable_flash: Uses FlashAttention to reduce memory footprint.
+    # enable_cueq
+    #   Activates the cuEquivariance CUDA kernel for equivariant tensor
+    #   contractions.  Provides 2–5× speedup on NVIDIA GPUs.
+    #   Requires: pip install cuequivariance cuequivariance-torch
+    #   Has no effect on CPU or with EMT / MACE backends.
     enable_cueq:  false
+
+    # enable_flash
+    #   Enables FlashAttention-2 for the attention layers present in some
+    #   SevenNet architectures.  Reduces GPU memory footprint by ~30 % and
+    #   improves throughput for long-range interaction models.
+    #   Requires: pip install flash-attn  (CUDA 11.8+ only)
     enable_flash: false
+
+    # ── ZBL short-range repulsion ──────────────────────────────────────────────
+    # Layered Ziegler-Biersack-Littmark (ZBL) screened-Coulomb repulsion.
+    #
+    # Background
+    # ----------
+    # ML potentials are trained on near-equilibrium structures.  At very short
+    # interatomic distances (sub-bonding, r < ~1.5 Å) encountered during
+    # aggressive MD or geometry searches, the MLIP energy surface can be
+    # unphysical — sometimes even attractive — because no such configurations
+    # appeared in the training data.  The ZBL potential provides the correct
+    # nuclear repulsion in this regime and prevents catastrophic geometry
+    # explosions.
+    #
+    # Implementation
+    # --------------
+    # When enabled, the engine builds
+    #   SumCalculator([<MLIP calculator>, ZBLCalculator(...)])
+    # using ASE's mixing module.  Energies and forces are summed independently,
+    # so gradients remain exact.  The ZBL contribution is non-zero only inside
+    # cutoff_outer, so it adds negligible overhead for well-prepared structures.
+    #
+    # Physics
+    # -------
+    # Pair energy:
+    #   V_ZBL(r) = (Z_i · Z_j · e²) / (4πε₀ · r) · Φ(r / a_ij)
+    #
+    # Universal screening length:
+    #   a_ij = 0.4685 Å / (Z_i^0.23 + Z_j^0.23)
+    #
+    # Universal screening function (4-term fit, ZBL 1985):
+    #   Φ(x) = 0.1818·e^(−3.200·x) + 0.5099·e^(−0.9423·x)
+    #         + 0.2802·e^(−0.4029·x) + 0.02817·e^(−0.2016·x)
+    #
+    # Switching function (cubic Hermite, C¹-smooth):
+    #   S(r) = 1                              r ≤ cutoff_inner
+    #   S(r) = 1 − 3t² + 2t³  (t normalised) cutoff_inner < r < cutoff_outer
+    #   S(r) = 0                              r ≥ cutoff_outer
+    # Forces are derived analytically from dV/dr · S(r) + V · dS/dr.
+    #
+    # Supported backend combinations
+    # --------------------------------
+    #   backend: "mace"     + zbl.enabled: true   →  MACE-MP  + ZBL
+    #   backend: "sevennet" + zbl.enabled: true   →  SevenNet + ZBL
+    #   backend: "mace", d3: true, zbl.enabled: true  →  MACE + D3 + ZBL
+    #   backend: "emt"      + zbl.enabled: true   →  EMT + ZBL (testing only)
+    #
+    # Per-pair outer cutoff database
+    # --------------------------------
+    # src/zbl_pairs.json stores element-pair-specific outer switching distances
+    # for 14 chemically relevant elements (Al, C, Cl, Cu, Fe, H, Hf, N, O, P,
+    # S, Si, Ti, Zr).  Each value is set to approximately the equilibrium bond
+    # length (R_cov_i + R_cov_j × 1.056, capped at 0.8–2.8 Å) so that ZBL is
+    # essentially inactive at normal bonding distances and only activates at
+    # sub-bonding close contacts.  Element pairs not listed in the file fall
+    # back to the global cutoff_outer parameter defined below.
+    #
+    # Cutoff guidelines for surface chemistry
+    # -----------------------------------------
+    #   Reference bond lengths:  Si–Si 2.35 Å · Si–O 1.64 Å · C–H 1.09 Å
+    #                            N–H  1.01 Å · Si–N 1.73 Å · Si–H 1.48 Å
+    #
+    #   cutoff_inner: 0.5 Å  — well below any covalent bond; ZBL is fully
+    #                           active only at extreme nuclear overlap.
+    #                           Short bonds (N–H 1.01 Å, O–H 0.96 Å) sit near
+    #                           the outer switching end where S ≈ 0, so ZBL
+    #                           does not perturb equilibrium geometries.
+    #   cutoff_outer: 2.5 Å  — global fallback for pairs absent from the DB.
+    #                           Per-pair values in src/zbl_pairs.json typically
+    #                           range from 0.8 Å (H–H) to 2.8 Å (heavy metals),
+    #                           keeping ZBL inactive at normal bonded distances.
+    zbl:
+      enabled:       false   # false → pure MLIP  |  true → MLIP + ZBL combination
+      cutoff_inner:  0.5     # Å. ZBL weight = 1 (fully active)  for r ≤ cutoff_inner.
+      cutoff_outer:  2.5     # Å. Global fallback outer cutoff for pairs not found in
+                             #    src/zbl_pairs.json.  ZBL weight = 0 for r ≥ this value.
+                             #    Weight transitions smoothly via cubic Hermite between
+                             #    cutoff_inner and the pair-specific (or fallback) outer
+                             #    cutoff — forces are continuous everywhere.
 
   # Default geometry optimization settings.
   # Inherited by surface_prep.slab_relaxation and reaction_search.candidate_relaxation.

@@ -8,10 +8,18 @@ paths:
 
 engine:
   potential:
-    backend: "mace"
-    device:  "cpu"
+    backend: "mace"     # "mace" | "sevennet" | "emt"
+    device:  "cpu"      # "cpu"  | "cuda"
     dtype:   "float64"
-    model:   "small"  # For faster execution during test
+    model:   "small"    # null → default foundation model
+    d3:      false      # D3 dispersion correction (mace / sevennet)
+    modal:   null       # multi-fidelity modality (sevennet only)
+    enable_cueq:  false # cuEquivariance kernel (sevennet only)
+    enable_flash: false # FlashAttention         (sevennet only)
+    zbl:                # Ziegler-Biersack-Littmark short-range repulsion
+      enabled:       false   # set true to activate MLIP + ZBL combination
+      cutoff_inner:  1.0     # Å – ZBL fully active below this distance
+      cutoff_outer:  2.5     # Å – ZBL smoothly switched off above this
   relaxation:
     fmax:      0.01
     steps:     500
