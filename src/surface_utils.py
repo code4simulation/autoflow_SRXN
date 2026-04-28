@@ -628,4 +628,7 @@ def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_
     # Final centering and wrapping
     slab.wrap()
     
+    # Apply standard offset (0.5 angstrom from bottom) and sort by element (atomic numbers)
+    slab = standardize_vasp_atoms(slab, z_min_offset=0.5)
+    
     return slab

@@ -129,10 +129,29 @@ engine:
 ## 4. Operational Harness
 
 ### 4.1 Installation
+
+The recommended method to install `autoflow-srxn` and its core dependencies is via `pip`. This will automatically resolve and install all requirements listed in `pyproject.toml`.
+
 ```bash
+# Standard installation
+pip install .
+
+# For development (editable mode)
 pip install -e .
-pip install ".[mace]"     # MACE-MP support
-pip install sevenn         # SevenNet support
+```
+
+#### MLIP Backend Installation
+To run structural relaxations and thermodynamic calculations using Machine Learning Interatomic Potentials, you must install the optional MLIP dependencies. The framework supports **MACE** and **SevenNet**.
+
+You can install all supported MLIP backends at once using the `mlip` optional dependency group:
+```bash
+pip install .[mlip]
+```
+
+Alternatively, you can install specific backends manually:
+```bash
+pip install mace-torch  # MACE-MP support
+pip install sevenn      # SevenNet support
 ```
 
 ### 4.2 Running PHVA Benchmark

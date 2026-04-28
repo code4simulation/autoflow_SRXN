@@ -1,4 +1,8 @@
 from setuptools import setup
 
+def get_requirements():
+    with open("requirements.txt", "r") as f:
+        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
 if __name__ == "__main__":
-    setup()
+    setup(install_requires=get_requirements())
