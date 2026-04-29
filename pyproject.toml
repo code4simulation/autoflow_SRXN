@@ -25,7 +25,6 @@ mlip = [
 ]
 
 [tool.setuptools]
-package-dir = {"autoflow_srxn" = "src"}
 packages = ["autoflow_srxn"]
 
 [tool.setuptools.package-data]

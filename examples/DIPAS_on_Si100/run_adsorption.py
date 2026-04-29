@@ -93,11 +93,17 @@ def run_generic_adsorption_study(config_path='config.yaml'):
     )
     logger.info(f"--- Starting AutoFlow-SRXN Discovery Study ({config_path}) ---")
 
-    mol_file   = paths['adsorbate']
+    mol_file   = paths.get('adsorbate')
     inh_file   = paths.get('inhibitor')
     out_prefix = paths.get('output_prefix', 'cands_out')
 
-    mol  = read(mol_file)
+    mol  = None
+    if mol_file:
+        if os.path.exists(mol_file):
+            mol = read(mol_file)
+        else:
+            logger.warning(f"Adsorbate file not found: {mol_file}")
+    
     slab = None
 
     # ── Stage 0: Substrate generation & passivation ────────────────────────────
@@ -145,29 +151,41 @@ def run_generic_adsorption_study(config_path='config.yaml'):
 
     # ── Stage 1: Inhibitor pre-treatment (optional branching) ─────────────────
     base_slabs = [slab]
-    if inh_file and os.path.exists(inh_file) and inh_cfg.get('enabled', False):
-        logger.info(f"STAGE 1: Inhibitor discovery ({inh_file})")
-        inh_mol    = read(inh_file)
-        inh_center = inh_cfg.get('inhibitor_center', 'O')
-        inh_cands  = execute_discovery_stage(
-            slab, inh_mol, config, f"{out_prefix}_inh",
-            logger, True, tag=2, center_target=inh_center,
-        )
-        limit      = inh_cfg.get('branching_limit', 5)
-        base_slabs = inh_cands[:limit]
-        logger.info(f"  Branching into {len(base_slabs)} inhibited geometries for Stage 2.")
+    if inh_cfg.get('enabled', False):
+        if not inh_file:
+            logger.info("STAGE 1: Inhibitor discovery skipped (inhibitor path is null).")
+        elif not os.path.exists(inh_file):
+            logger.warning(f"STAGE 1: Inhibitor discovery skipped (file not found: {inh_file}).")
+        else:
+            logger.info(f"STAGE 1: Inhibitor discovery ({inh_file})")
+            inh_mol    = read(inh_file)
+            inh_center = inh_cfg.get('inhibitor_center', 'O')
+            inh_cands  = execute_discovery_stage(
+                slab, inh_mol, config, f"{out_prefix}_inh",
+                logger, True, tag=2, center_target=inh_center,
+            )
+            limit      = inh_cfg.get('branching_limit', 5)
+            if inh_cands:
+                base_slabs = inh_cands[:limit]
+                logger.info(f"  Branching into {len(base_slabs)} inhibited geometries for Stage 2.")
+            else:
+                logger.info("  No inhibitor candidates found. Proceeding with clean slab.")
 
     # ── Stage 2: Main precursor discovery ─────────────────────────────────────
-    logger.info(f"STAGE 2: Main precursor discovery ({mol_file})")
-    mol_center       = mechs_cfg.get('chemisorption', {}).get('precursor_center', 'Si')
-    all_final_results = []
-    for i, s in enumerate(base_slabs):
-        suffix  = f"_inh{i}" if len(base_slabs) > 1 else ""
-        results = execute_discovery_stage(
-            s, mol, config, f"{out_prefix}{suffix}",
-            logger, True, tag=3, center_target=mol_center,
-        )
-        all_final_results.extend(results)
+    if not mol:
+        logger.info("STAGE 2: Main precursor discovery skipped (adsorbate is null or missing).")
+        all_final_results = []
+    else:
+        logger.info(f"STAGE 2: Main precursor discovery ({mol_file})")
+        mol_center       = mechs_cfg.get('chemisorption', {}).get('precursor_center', 'Si')
+        all_final_results = []
+        for i, s in enumerate(base_slabs):
+            suffix  = f"_inh{i}" if len(base_slabs) > 1 else ""
+            results = execute_discovery_stage(
+                s, mol, config, f"{out_prefix}{suffix}",
+                logger, True, tag=3, center_target=mol_center,
+            )
+            all_final_results.extend(results)
 
     logger.info(f"--- Study Complete. Total unique candidates: {len(all_final_results)} ---")
 
