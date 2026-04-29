@@ -254,6 +254,9 @@ surface_prep:
     thickness_ang:      15.0          # Slab thickness (Å)
     vacuum_ang:         15.0          # Vacuum padding above and below slab (Å)
     target_area_ang2:   200.0         # Target supercell XY area (Å²). null → minimal unit cell.
+                                      # The engine selects the largest possible supercell that does NOT
+                                      # exceed this value (<= target_area), while optimizing for a
+                                      # square-like aspect ratio.
     supercell_matrix:   null          # Explicit supercell [[a,b],[c,d]]. Overrides target_area if set.
     top_termination:    "O"           # Element required at the top surface
     bottom_termination: "O"           # Element required at the bottom surface
