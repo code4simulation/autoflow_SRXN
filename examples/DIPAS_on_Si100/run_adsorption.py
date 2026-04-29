@@ -187,6 +187,37 @@ def run_generic_adsorption_study(config_path='config.yaml'):
             )
             all_final_results.extend(results)
 
+    # ── Stage 3: Short Relaxation (Verification) ──────────────────────────────
+    relax_cfg = rs_cfg.get('candidate_relaxation', {})
+    if all_final_results and relax_cfg.get('enabled', False):
+        from autoflow_srxn.potentials import SimulationEngine
+        logger.info(f"STAGE 3: Performing short relaxation (10 steps) on {len(all_final_results)} candidates...")
+        
+        # Ensure a default potential is set if none exists in config for this example
+        if 'engine' not in config:
+            config['engine'] = {'potential': {'backend': 'emt'}}
+            
+        engine = SimulationEngine(config)
+        relaxed_cands = []
+        
+        for i, atoms in enumerate(all_final_results):
+            atoms_relaxed = atoms.copy()
+            atoms_relaxed.info = atoms.info.copy() # Ensure info is preserved
+            
+            try:
+                # Perform a quick 10-step relaxation
+                engine.relax(atoms_relaxed, steps=10, verbose=False, fmax=0.01)
+                atoms_relaxed.info['relaxation'] = 'short_relax_10_steps'
+            except Exception as e:
+                logger.warning(f"  Relaxation failed for candidate {i}: {e}")
+                atoms_relaxed.info['relaxation'] = 'failed'
+            
+            relaxed_cands.append(atoms_relaxed)
+            
+        if relaxed_cands:
+            write(f'{out_prefix}_relaxed_poses.extxyz', relaxed_cands)
+            logger.info(f"Saved relaxed candidates to '{out_prefix}_relaxed_poses.extxyz'.")
+
     logger.info(f"--- Study Complete. Total unique candidates: {len(all_final_results)} ---")
 
 

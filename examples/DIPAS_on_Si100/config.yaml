@@ -9,6 +9,15 @@ paths:
   inhibitor:       "../../structures/ethanol.vasp"
   output_dir:      "results"
   output_prefix:   "dipas_on_si100_results"
+engine:
+  potential:
+    backend: "mace"
+    device:  "cpu"
+    dtype:   "float32"
+  relaxation:
+    fmax: 0.05
+    steps: 200
+    optimizer: "BFGS"
 
 surface_prep:
   slab_generation:
@@ -69,4 +78,4 @@ reaction_search:
     symprec:        0.2
 
   candidate_relaxation:
-    enabled: false   # No potential configured for this geometry-only example
+    enabled: true
