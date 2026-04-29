@@ -130,10 +130,18 @@ def run_generic_adsorption_study(config_path='config.yaml'):
         recon_cfg = sub_gen_cfg.get('reconstruction', {})
         if recon_cfg.get('enabled', False):
             from autoflow_srxn.surface_utils import apply_surface_reconstruction
-            strategy = recon_cfg.get('strategy', 'si100_2x1_buckled')
+            strategy = recon_cfg.get('strategy', 'auto')
             side = recon_cfg.get('side', 'top')
             logger.info(f"Applying surface reconstruction strategy: {strategy} on {side}...")
-            slab = apply_surface_reconstruction(slab, strategy=strategy, side=side, verbose=True)
+            
+            # Extract hyperparameters for fine-tuning
+            recon_params = {
+                'buckling_dist': recon_cfg.get('buckling_dist', 0.4),
+                'dimer_dist':    recon_cfg.get('dimer_dist', 0.6),
+                'amplitude':     recon_cfg.get('amplitude', 0.1)
+            }
+            
+            slab = apply_surface_reconstruction(slab, strategy=strategy, side=side, verbose=True, **recon_params)
             write_standardized_vasp('reconstructed_substrate.vasp', slab)
             logger.info(f"Saved reconstructed substrate to 'reconstructed_substrate.vasp'.")
     else:

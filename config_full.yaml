@@ -262,14 +262,47 @@ surface_prep:
     bottom_termination: "O"           # Element required at the bottom surface
     
     # ── Surface Reconstruction ───────────────────────────────────────────────
+    # Surface atoms often rearrange to minimize surface free energy, breaking 
+    # the symmetry of the ideal bulk-terminated structure. This block allows 
+    # for the automated application of initial geometric perturbations 
+    # (Stage 0.5) before the main reaction search.
     reconstruction:
-      enabled:  false                # true → Apply intelligent geometric reconstruction pattern
-      strategy: "auto"               # "auto": Classifies material and applies physics rules:
-                                     #   - Covalent (Si/C): Dimerization
-                                     #   - Ionic (Oxides): Rumpling (cation/anion shift)
-                                     #   - Metallic: Layer relaxation + Noise
-                                     # Or use specific: "si100_2x1_buckled", "random_noise"
-      side:     "top"                # "top" | "bottom" | "both"
+      enabled:  false                # Toggle for automated surface reconstruction logic.
+
+      # Reconstruction Strategy:
+      # "auto" (Recommended)
+      #   The Intelligent Reconstruction Engine automatically classifies the material 
+      #   based on electronegativity and coordination to apply the best-fit pattern:
+      #   - Covalent (e.g., Si, Ge, C): Applies Dimerization and Buckling to reduce 
+      #     surface energy from dangling bonds.
+      #   - Ionic (e.g., Oxides, Salts): Applies Rumpling (vertical displacement where 
+      #     cations retract inward and anions bulge outward).
+      #   - Metallic: Applies Surface Relaxation (inward layer contraction) and 
+      #     random noise to break electronic symmetry.
+      #
+      # "si100_2x1_buckled"
+      #   Specifically forces a Si(100)-type p(2x1) buckled dimer reconstruction. 
+      #   It identifies closest neighbors on the surface and pairs them up.
+      #
+      # "random_noise"
+      #   Applies small random displacements to all surface atoms. This acts as a 
+      #   general symmetry breaker, allowing high-fidelity potentials (like MACE) 
+      #   to discover unknown reconstructions during subsequent relaxation stages.
+      strategy: "auto"
+
+      # Target surface for reconstruction.
+      # "top"    : Reconstruct only the top (reactive) surface.
+      # "bottom" : Reconstruct only the bottom surface.
+      # "both"   : Reconstruct both sides (useful for symmetric thin films).
+      side:     "top"
+
+      # --- Strategy-specific Hyperparameters ---
+      # Magnitude of vertical displacement (Å) for buckling or rumpling patterns.
+      buckling_dist: 0.4
+      # Magnitude of lateral displacement (Å) for dimerization (pulling pairs together).
+      dimer_dist:    0.6
+      # Amplitude (Å) for random displacements in 'random_noise' or 'auto' metallic modes.
+      amplitude:     0.1
 
   passivation:
     enabled:   true

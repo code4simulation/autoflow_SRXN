@@ -647,6 +647,20 @@ def apply_surface_reconstruction(atoms, strategy='auto', side='top', verbose=Fal
     else:
         return atoms
 
+# Pauling Electronegativity values for the first 94 elements (standard literature values)
+PAULING_EN = {
+    1: 2.20, 2: 0.00, 3: 0.98, 4: 1.57, 5: 2.04, 6: 2.55, 7: 3.04, 8: 3.44, 9: 3.98, 10: 0.00,
+    11: 0.93, 12: 1.31, 13: 1.61, 14: 1.90, 15: 2.19, 16: 2.58, 17: 3.16, 18: 0.00, 19: 0.82, 20: 1.00,
+    21: 1.36, 22: 1.54, 23: 1.63, 24: 1.66, 25: 1.55, 26: 1.83, 27: 1.88, 28: 1.91, 29: 1.90, 30: 1.65,
+    31: 1.81, 32: 2.01, 33: 2.18, 34: 2.55, 35: 2.96, 36: 3.00, 37: 0.82, 38: 0.95, 39: 1.22, 40: 1.33,
+    41: 1.60, 42: 2.16, 43: 1.90, 44: 2.20, 45: 2.28, 46: 2.20, 47: 1.93, 48: 1.69, 49: 1.78, 50: 1.96,
+    51: 2.05, 52: 2.10, 53: 2.66, 54: 2.60, 55: 0.79, 56: 0.89, 57: 1.10, 58: 1.12, 59: 1.13, 60: 1.14,
+    61: 1.13, 62: 1.17, 63: 1.20, 64: 1.20, 65: 1.22, 66: 1.23, 67: 1.24, 68: 1.24, 69: 1.25, 70: 1.10,
+    71: 1.27, 72: 1.30, 73: 1.50, 74: 2.36, 75: 1.90, 76: 2.20, 77: 2.20, 78: 2.28, 79: 2.54, 80: 2.00,
+    81: 1.62, 82: 2.33, 83: 2.02, 84: 2.00, 85: 2.20, 86: 2.20, 87: 0.70, 88: 0.90, 89: 1.10, 90: 1.30,
+    91: 1.50, 92: 1.38, 93: 1.36, 94: 1.28
+}
+
 def auto_reconstruct_surface(atoms, side='top', verbose=False):
     """
     Intelligent Reconstruction Engine based on Chemical Classification:
@@ -654,17 +668,15 @@ def auto_reconstruct_surface(atoms, side='top', verbose=False):
     2. Ionic (Oxides, Halides): Rumpling (cation/anion vertical offset).
     3. Metallic: Inward Surface Relaxation + Random Noise.
     """
-    from ase.data import electronegativities
-    
     indices = find_surface_indices(atoms, side=side, threshold=1.5)
     if len(indices) == 0: return atoms
     
     atomic_numbers = atoms.numbers[indices]
-    # Handle missing electronegativity values safely
+    # Use internal PAULING_EN mapping
     chi = []
     for n in atomic_numbers:
-        val = electronegativities[n]
-        chi.append(val if not np.isnan(val) else 2.0)
+        val = PAULING_EN.get(n, 2.0)
+        chi.append(val)
     chi = np.array(chi)
     
     # --- Classification Logic ---
