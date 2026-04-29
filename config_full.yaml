@@ -263,8 +263,12 @@ surface_prep:
     
     # ── Surface Reconstruction ───────────────────────────────────────────────
     reconstruction:
-      enabled:  false                # true → Apply geometric reconstruction pattern
-      strategy: "si100_2x1_buckled"  # Currently supported: "si100_2x1_buckled"
+      enabled:  false                # true → Apply intelligent geometric reconstruction pattern
+      strategy: "auto"               # "auto": Classifies material and applies physics rules:
+                                     #   - Covalent (Si/C): Dimerization
+                                     #   - Ionic (Oxides): Rumpling (cation/anion shift)
+                                     #   - Metallic: Layer relaxation + Noise
+                                     # Or use specific: "si100_2x1_buckled", "random_noise"
       side:     "top"                # "top" | "bottom" | "both"
 
   passivation:

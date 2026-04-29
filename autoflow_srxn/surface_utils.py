@@ -633,18 +633,85 @@ def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_
     
     return slab
 
-def apply_surface_reconstruction(atoms, strategy='si100_2x1_buckled', side='top', verbose=False):
+def apply_surface_reconstruction(atoms, strategy='auto', side='top', verbose=False):
     """
-    Applies a specific surface reconstruction pattern to the given slab.
-    Currently supported:
-    - 'si100_2x1_buckled': Dimers along the closest pairing direction with out-of-plane buckling.
+    Applies surface reconstruction. 
+    If strategy='auto' or True, identifies material class and applies physical rules.
     """
-    if strategy == 'si100_2x1_buckled':
+    if strategy == 'auto' or strategy is True:
+        return auto_reconstruct_surface(atoms, side=side, verbose=verbose)
+    elif strategy == 'si100_2x1_buckled':
         return reconstruct_si100_2x1_buckled(atoms, side=side, verbose=verbose)
     elif strategy == 'random_noise':
         return apply_random_surface_noise(atoms, side=side, verbose=verbose)
     else:
-        raise ValueError(f"Unknown reconstruction strategy: {strategy}")
+        return atoms
+
+def auto_reconstruct_surface(atoms, side='top', verbose=False):
+    """
+    Intelligent Reconstruction Engine based on Chemical Classification:
+    1. Covalent (Si, Ge, C): Dimerization + Buckling (break dangling bonds).
+    2. Ionic (Oxides, Halides): Rumpling (cation/anion vertical offset).
+    3. Metallic: Inward Surface Relaxation + Random Noise.
+    """
+    from ase.data import electronegativities
+    
+    indices = find_surface_indices(atoms, side=side, threshold=1.5)
+    if len(indices) == 0: return atoms
+    
+    atomic_numbers = atoms.numbers[indices]
+    # Handle missing electronegativity values safely
+    chi = []
+    for n in atomic_numbers:
+        val = electronegativities[n]
+        chi.append(val if not np.isnan(val) else 2.0)
+    chi = np.array(chi)
+    
+    # --- Classification Logic ---
+    # 1. Group IV Covalent
+    is_group_iv = all(n in [6, 14, 32] for n in atomic_numbers)
+    
+    # 2. Ionic (Electronegativity difference > 1.5)
+    delta_chi = np.max(chi) - np.min(chi)
+    is_ionic = delta_chi > 1.5
+    
+    # 3. Metallic (Low average EN or metal element profile)
+    # Heuristic: if most atoms are metals (non-electronegative)
+    is_metal = np.mean(chi) < 1.9 or all(n not in [6, 7, 8, 9, 15, 16, 17] for n in atoms.numbers)
+
+    if verbose:
+        print(f"  [AutoReconstructor] Analyzing {len(indices)} {side} atoms...")
+
+    if is_group_iv:
+        if verbose: print("  [AutoReconstructor] Pattern: Covalent Semiconductor -> Dimerization + Buckling.")
+        return reconstruct_si100_2x1_buckled(atoms, side=side, verbose=verbose)
+    
+    elif is_ionic:
+        if verbose: print(f"  [AutoReconstructor] Pattern: Ionic/Oxide (dChi={delta_chi:.1f}) -> Rumpling.")
+        new_atoms = atoms.copy()
+        pos = new_atoms.positions
+        chi_mean = np.mean(chi)
+        for i, idx in enumerate(indices):
+            # Rumpling: Low EN (cation) moves IN, High EN (anion) moves OUT
+            shift = 0.2 if chi[i] > chi_mean else -0.2
+            pos[idx, 2] += shift * (1 if side == 'top' else -1)
+        new_atoms.set_positions(pos)
+        return apply_random_surface_noise(new_atoms, side=side, amplitude=0.05)
+        
+    elif is_metal:
+        if verbose: print("  [AutoReconstructor] Pattern: Metallic -> Layer Relaxation + Noise.")
+        new_atoms = atoms.copy()
+        pos = new_atoms.positions
+        # Smoluchowski smoothing: inward shift of top layer
+        shift = -0.15 * (1 if side == 'top' else -1)
+        pos[indices, 2] += shift
+        new_atoms.set_positions(pos)
+        return apply_random_surface_noise(new_atoms, side=side, amplitude=0.1)
+    
+    else:
+        # Fallback for complex/mixed systems
+        if verbose: print("  [AutoReconstructor] Pattern: Mixed/Unknown -> Random Symmetry Breaking.")
+        return apply_random_surface_noise(atoms, side=side, amplitude=0.15)
 
 def apply_random_surface_noise(atoms, side='top', amplitude=0.1, verbose=False):
     """
