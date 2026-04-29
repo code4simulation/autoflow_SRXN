@@ -260,6 +260,12 @@ surface_prep:
     supercell_matrix:   null          # Explicit supercell [[a,b],[c,d]]. Overrides target_area if set.
     top_termination:    "O"           # Element required at the top surface
     bottom_termination: "O"           # Element required at the bottom surface
+    
+    # ── Surface Reconstruction ───────────────────────────────────────────────
+    reconstruction:
+      enabled:  false                # true → Apply geometric reconstruction pattern
+      strategy: "si100_2x1_buckled"  # Currently supported: "si100_2x1_buckled"
+      side:     "top"                # "top" | "bottom" | "both"
 
   passivation:
     enabled:   true

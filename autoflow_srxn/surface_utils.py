@@ -632,3 +632,80 @@ def create_slab_from_bulk(bulk_atoms, miller_indices, thickness, vacuum, target_
     slab = standardize_vasp_atoms(slab, z_min_offset=0.5)
     
     return slab
+
+def apply_surface_reconstruction(atoms, strategy='si100_2x1_buckled', side='top', verbose=False):
+    """
+    Applies a specific surface reconstruction pattern to the given slab.
+    Currently supported:
+    - 'si100_2x1_buckled': Dimers along the closest pairing direction with out-of-plane buckling.
+    """
+    if strategy == 'si100_2x1_buckled':
+        return reconstruct_si100_2x1_buckled(atoms, side=side, verbose=verbose)
+    else:
+        raise ValueError(f"Unknown reconstruction strategy: {strategy}")
+
+def reconstruct_si100_2x1_buckled(atoms, side='top', dimer_dist=0.6, buckling_dist=0.4, verbose=False):
+    """
+    Generalized Si(100) 2x1 reconstruction with buckling.
+    Works by identifying closest top-layer pairs and applying displacement vectors.
+    
+    dimer_dist: displacement towards each other (Angstrom). 
+                Ideally, Si-Si distance changes from ~3.8A to ~2.4A, so ~0.7A each.
+    buckling_dist: vertical displacement (Angstrom).
+    """
+    new_atoms = atoms.copy()
+    indices = find_surface_indices(new_atoms, side=side, threshold=1.0)
+    
+    if len(indices) < 2:
+        return new_atoms
+        
+    pos = new_atoms.positions
+    from scipy.spatial.distance import pdist, squareform
+    
+    # Calculate pair distances on XY plane only to find lateral neighbors
+    xy_pos = pos[indices][:, :2]
+    dist_matrix = squareform(pdist(xy_pos))
+    np.fill_diagonal(dist_matrix, 1e9)
+    
+    matched = set()
+    dimer_count = 0
+    
+    if verbose:
+        print(f"  [Reconstruction] Applying buckled dimerization on {len(indices)} {side} atoms.")
+
+    for i in range(len(indices)):
+        if i in matched: continue
+        
+        # Find closest neighbor that isn't matched
+        j = np.argmin(dist_matrix[i])
+        d = dist_matrix[i, j]
+        
+        # In Si(100), ideal Si-Si is ~3.84A. We search for pairs within 4.5A.
+        if d < 4.5 and j not in matched:
+            idx_i, idx_j = indices[i], indices[j]
+            
+            # Vector from i to j
+            vec = pos[idx_j] - pos[idx_i]
+            vec[2] = 0 # keep XY only
+            unit_vec = vec / np.linalg.norm(vec)
+            
+            # 1. Dimerization: Pull them together laterally
+            pos[idx_i] += unit_vec * dimer_dist
+            pos[idx_j] -= unit_vec * dimer_dist
+            
+            # 2. Buckling: One up, one down to break symmetry
+            # We alternate the buckling direction to avoid net polarization 
+            # and help relaxation find the global minimum.
+            direction = 1 if dimer_count % 2 == 0 else -1
+            pos[idx_i, 2] += buckling_dist * direction
+            pos[idx_j, 2] -= buckling_dist * direction
+            
+            matched.add(i)
+            matched.add(j)
+            dimer_count += 1
+            
+    if verbose:
+        print(f"  [Reconstruction] Formed {dimer_count} buckled dimers.")
+        
+    new_atoms.set_positions(pos)
+    return new_atoms

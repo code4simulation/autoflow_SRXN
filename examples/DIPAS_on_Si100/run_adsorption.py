@@ -125,6 +125,17 @@ def run_generic_adsorption_study(config_path='config.yaml'):
         )
         write_standardized_vasp('generated_substrate.vasp', slab)
         logger.info("Saved generated raw substrate to 'generated_substrate.vasp'.")
+
+        # [Optional Reconstruction]
+        recon_cfg = sub_gen_cfg.get('reconstruction', {})
+        if recon_cfg.get('enabled', False):
+            from autoflow_srxn.surface_utils import apply_surface_reconstruction
+            strategy = recon_cfg.get('strategy', 'si100_2x1_buckled')
+            side = recon_cfg.get('side', 'top')
+            logger.info(f"Applying surface reconstruction strategy: {strategy} on {side}...")
+            slab = apply_surface_reconstruction(slab, strategy=strategy, side=side, verbose=True)
+            write_standardized_vasp('reconstructed_substrate.vasp', slab)
+            logger.info(f"Saved reconstructed substrate to 'reconstructed_substrate.vasp'.")
     else:
         slab_path = paths.get('substrate_slab')
         if not slab_path:
