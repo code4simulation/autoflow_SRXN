@@ -56,12 +56,12 @@ reaction_search:
     physisorption:
       enabled:          true
       placement_height: 3.5
-      rot_steps:        8
+      rot_steps:        2
 
     chemisorption:
       enabled:          true
       precursor_center: "Si"
-      rot_steps:        8
+      rot_steps:        2
 
     inhibition:
       enabled:          true
@@ -82,3 +82,4 @@ reaction_search:
     steps:   10
     fmax:    0.01
     verbose: false
+    selected_indices: null  # Optional: List of indices to relax, e.g. [0, 5, 10]

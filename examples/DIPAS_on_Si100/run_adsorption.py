@@ -195,8 +195,11 @@ def run_generic_adsorption_study(config_path='config.yaml'):
         n_steps = relax_cfg.get('steps', 10)
         fmax_val = relax_cfg.get('fmax', 0.01)
         v_flag = relax_cfg.get('verbose', False)
+        sel_idx = relax_cfg.get('selected_indices', None)
 
-        logger.info(f"STAGE 3: Performing short relaxation ({n_steps} steps) on {len(all_final_results)} candidates...")
+        n_total = len(all_final_results)
+        n_target = len(sel_idx) if sel_idx is not None else n_total
+        logger.info(f"STAGE 3: Performing short relaxation ({n_steps} steps) on {n_target}/{n_total} candidates...")
         
         # We rely on the engine block in config.yaml. SimulationEngine handles defaults if missing.
         if 'engine' in config:
@@ -206,18 +209,21 @@ def run_generic_adsorption_study(config_path='config.yaml'):
             logger.warning("  [Relaxation] 'engine' block missing in config. Falling back to internal defaults.")
             
         engine = SimulationEngine(config)
-        relaxed_cands = []
+        calc = engine.get_calculator() # Load engine once before the table starts
         
-        logger.info(f"{'ID':<4} | {'Mechanism':<15} | {'E_initial (eV)':<15} | {'E_final (eV)':<15} | {'Delta (eV)':<10}")
-        logger.info("-" * 75)
+        relaxed_cands = []
+        summary_data = [] # To store results for clean table output at the end
 
         for i, atoms in enumerate(all_final_results):
+            # Skip if not in selected_indices
+            if sel_idx is not None and i not in sel_idx:
+                continue
+
             atoms_relaxed = atoms.copy()
             atoms_relaxed.info = atoms.info.copy()
             
             try:
                 # Attach calculator to get initial energy
-                calc = engine.get_calculator()
                 atoms_relaxed.calc = calc
                 e_init = atoms_relaxed.get_potential_energy()
                 
@@ -226,18 +232,39 @@ def run_generic_adsorption_study(config_path='config.yaml'):
                 
                 e_final = atoms_relaxed.get_potential_energy()
                 delta_e = e_final - e_init
-                
                 mech = atoms.info.get('mechanism', 'unknown')
-                logger.info(f"{i:<4} | {mech[:15]:<15} | {e_init:15.4f} | {e_final:15.4f} | {delta_e:10.4f}")
+                
+                summary_data.append({
+                    'id': i, 'mech': mech, 'e_init': e_init, 'e_final': e_final, 'delta': delta_e
+                })
                 
                 atoms_relaxed.info['e_initial'] = e_init
                 atoms_relaxed.info['e_final'] = e_final
                 atoms_relaxed.info['relaxation'] = f'short_relax_{n_steps}_steps'
             except Exception as e:
-                logger.warning(f"{i:<4} | Relaxation failed: {e}")
+                logger.warning(f"Candidate {i} relaxation failed: {e}")
                 atoms_relaxed.info['relaxation'] = 'failed'
             
             relaxed_cands.append(atoms_relaxed)
+
+        # --- Print Visual Summary Table ---
+        if summary_data:
+            # Find best (lowest e_final) for each mechanism group
+            best_by_mech = {}
+            for row in summary_data:
+                m = row['mech']
+                if m not in best_by_mech or row['e_final'] < best_by_mech[m]['e_final']:
+                    best_by_mech[m] = row
+
+            best_ids = {res['id'] for res in best_by_mech.values()}
+
+            logger.info("\n" + "="*95)
+            logger.info(f"{'ID':<4} | {'Mechanism':<15} | {'E_initial (eV)':<15} | {'E_final (eV)':<15} | {'Delta (eV)':<10} | {'Note'}")
+            logger.info("-" * 95)
+            for row in summary_data:
+                marker = "* (Best Pose)" if row['id'] in best_ids else ""
+                logger.info(f"{row['id']:<4} | {row['mech'][:15]:<15} | {row['e_init']:15.4f} | {row['e_final']:15.4f} | {row['delta']:10.4f} | {marker}")
+            logger.info("="*95 + "\n")
             
         if relaxed_cands:
             write(f'{out_prefix}_relaxed_poses.extxyz', relaxed_cands)
