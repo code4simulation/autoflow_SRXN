@@ -20,8 +20,28 @@ def load_config(config_path):
         return yaml.safe_load(f)
 
 
-def execute_verification_stage(candidates, config, logger, out_prefix, tag=3):
-    """Performs Relaxation and Equilibration (MD) on candidates using ML potentials."""
+def calculate_gas_energy(mol, config, logger):
+    """Calculates the potential energy of a molecule in vacuum after relaxation."""
+    from autoflow_srxn.potentials import SimulationEngine
+
+    mol_copy = mol.copy()
+    mol_copy.center(vacuum=10.0)
+    engine = SimulationEngine(config)
+    try:
+        mol_copy.calc = engine.get_calculator()
+        engine.relax(mol_copy, steps=100, fmax=0.02, verbose=False)
+        e_gas = mol_copy.get_potential_energy()
+        logger.info(f"  [Gas Phase] {mol.get_chemical_formula()} optimized energy: {e_gas:.4f} eV")
+        return e_gas
+    except Exception as e:
+        logger.error(f"  [Gas Phase] Failed to calculate energy for {mol.get_chemical_formula()}: {e}")
+        return 0.0
+
+
+def execute_verification_stage(candidates, config, logger, out_prefix, tag=3, e_gas=0.0, e_base=0.0):
+    """Performs Relaxation, Equilibration (MD), and Optional Post-Relax on candidates.
+    Also calculates and logs the adsorption energy (E_ads).
+    """
     rs_cfg = config.get("reaction_search", {})
     verify_cfg = rs_cfg.get("verification", {})
     run_relax = verify_cfg.get("relaxation", {}).get("enabled", False)
@@ -72,6 +92,7 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3):
         try:
             e_init = atoms_proc.get_potential_energy()
 
+            # --- 1. Initial Relaxation ---
             if run_relax:
                 r_cfg = verify_cfg.get("relaxation", {})
                 engine.relax(
@@ -81,6 +102,7 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3):
                     verbose=r_cfg.get("verbose", False),
                 )
 
+            # --- 2. Thermal Equilibration (MD) ---
             if run_equil:
                 e_cfg = verify_cfg.get("equilibration", {})
                 engine.run_md(
@@ -92,14 +114,22 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3):
                     frozen_z_ang=e_cfg.get("frozen_z_ang"),
                 )
 
+                # --- 3. Post-Equilibration Relaxation ---
+                if e_cfg.get("post_relax", True):
+                    engine.relax(atoms_proc, steps=50, fmax=0.05, verbose=False)
+
             e_final = atoms_proc.get_potential_energy()
-            delta_e = e_final - e_init
+            # E_ads = E_total - (E_gas + E_base)
+            e_ads = e_final - (e_gas + e_base)
             mech = atoms.info.get("mechanism", "unknown")
 
-            summary_data.append({"id": i, "mech": mech, "e_init": e_init, "e_final": e_final, "delta": delta_e})
+            summary_data.append(
+                {"id": i, "mech": mech, "e_init": e_init, "e_final": e_final, "delta": e_final - e_init, "e_ads": e_ads}
+            )
 
             atoms_proc.info["e_initial"] = e_init
             atoms_proc.info["e_final"] = e_final
+            atoms_proc.info["e_ads"] = e_ads
             atoms_proc.info["verification"] = f"relax={run_relax}_equil={run_equil}"
         except Exception as e:
             logger.warning(f"  [Verification] Candidate {i} failed: {e}")
@@ -115,7 +145,7 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3):
     return processed_cands
 
 
-def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True, tag=2, center_target="Si"):
+def execute_discovery_stage(slab, mol, config, out_prefix, logger, tag=2, center_target="Si"):
     """Orchestrates candidate generation and subsequent verification."""
     rs_cfg = config.get("reaction_search", {})
     mechs_cfg = rs_cfg.get("mechanisms", {})
@@ -126,8 +156,20 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True,
     run_phy = physi_cfg.get("enabled", True)
     run_chem = chem_cfg.get("enabled", True)
 
-    mgr = AdsorptionWorkflowManager(slab, config=config, symprec=symprec, verbose=verbose)
+    mgr = AdsorptionWorkflowManager(slab, config=config, symprec=symprec, verbose=False)
     all_cands = []
+
+    # Calculate reference energies for E_ads
+    e_gas = calculate_gas_energy(mol, config, logger)
+    try:
+        e_base = slab.get_potential_energy()
+    except Exception:
+        # If slab has no calculator, we need one to get baseline energy
+        from autoflow_srxn.potentials import SimulationEngine
+
+        engine = SimulationEngine(config)
+        slab.calc = engine.get_calculator()
+        e_base = slab.get_potential_energy()
 
     if run_phy:
         logger.info(f"  Physisorption search for {mol.get_chemical_formula()}...")
@@ -151,7 +193,7 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True,
             surface=slab,
             rot_steps=chem_cfg.get("rot_steps", 8),
             config=config,
-            verbose=verbose,
+            verbose=False,
             tag=tag,
         )
         for c in chem_cands:
@@ -165,8 +207,10 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True,
     if all_cands:
         write(f"{out_prefix}_all_poses.extxyz", all_cands)
 
-    # NEW: Automated Verification (Relax + Equil) integrated into the stage
-    verified_cands = execute_verification_stage(all_cands, config, logger, out_prefix, tag=tag)
+    # Automated Verification (Relax + Equil + Post-Relax)
+    verified_cands = execute_verification_stage(
+        all_cands, config, logger, out_prefix, tag=tag, e_gas=e_gas, e_base=e_base
+    )
     return verified_cands
 
 
