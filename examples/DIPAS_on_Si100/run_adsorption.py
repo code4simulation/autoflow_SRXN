@@ -170,29 +170,19 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True,
     return verified_cands
 
 
-def run_generic_adsorption_study(config_path="config.yaml"):
-    config = load_config(config_path)
+def execute_discovery_workflow(config, logger):
+    """Core logic for a single discovery run (one precursor, one inhibitor)."""
     paths = config["paths"]
     sp_cfg = config.get("surface_prep", {})
     rs_cfg = config.get("reaction_search", {})
     mechs_cfg = rs_cfg.get("mechanisms", {})
     inh_cfg = mechs_cfg.get("inhibition", {})
 
-    logger = setup_logger(
-        log_path=paths.get("output_prefix", "results") + "_workflow.log",
-        verbose=True,
-        mode="w",
-    )
-    log_stage_title(logger, "AutoFlow-SRXN", f"Starting Discovery Study ({config_path})")
-
     mol_file = paths.get("adsorbate")
     inh_file = paths.get("inhibitor")
-    out_prefix = paths.get("output_prefix", "cands_out")
+    out_prefix = paths.get("output_prefix", "results")
 
-    mol = None
-    if mol_file and os.path.exists(mol_file):
-        mol = read(mol_file)
-
+    mol = read(mol_file) if mol_file and os.path.exists(mol_file) else None
     slab = None
 
     # ── Stage 0: Substrate generation & passivation ────────────────────────────
@@ -211,65 +201,52 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             bottom_termination=sub_gen_cfg.get("bottom_termination"),
             verbose=True,
         )
-        write_standardized_vasp("generated_substrate.vasp", slab)
-
         recon_cfg = sub_gen_cfg.get("reconstruction", {})
         if recon_cfg.get("enabled", False):
             from autoflow_srxn.surface_utils import apply_surface_reconstruction
 
-            strategy = recon_cfg.get("strategy", "auto")
-            side = recon_cfg.get("side", "top")
-            recon_params = {
-                "buckling_dist": recon_cfg.get("buckling_dist", 0.4),
-                "dimer_dist": recon_cfg.get("dimer_dist", 0.6),
-                "amplitude": recon_cfg.get("amplitude", 0.1),
-            }
-            slab = apply_surface_reconstruction(slab, strategy=strategy, side=side, verbose=True, **recon_params)
-            write_standardized_vasp("reconstructed_substrate.vasp", slab)
+            slab = apply_surface_reconstruction(
+                slab,
+                strategy=recon_cfg.get("strategy", "auto"),
+                side=recon_cfg.get("side", "top"),
+                buckling_dist=recon_cfg.get("buckling_dist", 0.4),
+                dimer_dist=recon_cfg.get("dimer_dist", 0.6),
+                amplitude=recon_cfg.get("amplitude", 0.1),
+            )
     else:
         slab = read(paths["substrate_slab"])
 
     pass_cfg = sp_cfg.get("passivation", {})
     if pass_cfg.get("enabled", False):
         ideal_coord = sp_cfg.get("surface_analysis", {}).get("ideal_coordination", {})
-        side = pass_cfg.get("side", "bottom")
-        sides = [side] if side != "both" else ["top", "bottom"]
-        for s in sides:
-            slab = passivate_surface_coverage_general(
-                slab,
-                h_coverage=pass_cfg.get("coverage", 1.0),
-                valence_map=ideal_coord,
-                element=pass_cfg.get("element", "H"),
-                side=s,
-                verbose=True,
-            )
-        write_standardized_vasp("passivated.vasp", slab)
+        slab = passivate_surface_coverage_general(
+            slab,
+            h_coverage=pass_cfg.get("coverage", 1.0),
+            valence_map=ideal_coord,
+            element=pass_cfg.get("element", "H"),
+            side=pass_cfg.get("side", "bottom"),
+        )
 
     slab_relax_cfg = sp_cfg.get("slab_relaxation", {})
     if slab_relax_cfg.get("enabled", False):
         from autoflow_srxn.potentials import SimulationEngine
 
         log_stage_title(logger, "STAGE 0.5", "Performing slab relaxation...")
-        try:
-            engine = SimulationEngine(config)
-            slab.calc = engine.get_calculator()
-            e_init = slab.get_potential_energy()
-            engine.relax(
-                slab,
-                fmax=slab_relax_cfg.get("fmax", 0.05),
-                steps=slab_relax_cfg.get("steps", 200),
-                frozen_z_ang=slab_relax_cfg.get("frozen_z_ang"),
-                verbose=True,
-            )
-            log_energy_comparison(logger, "Slab Relax", e_init, slab.get_potential_energy())
-            write_standardized_vasp("relaxed_slab.vasp", slab)
-        except Exception as e:
-            logger.error(f"Slab relaxation failed: {e}")
+        engine = SimulationEngine(config)
+        slab.calc = engine.get_calculator()
+        e_init = slab.get_potential_energy()
+        engine.relax(
+            slab,
+            fmax=slab_relax_cfg.get("fmax", 0.05),
+            steps=slab_relax_cfg.get("steps", 200),
+            frozen_z_ang=slab_relax_cfg.get("frozen_z_ang"),
+        )
+        log_energy_comparison(logger, "Slab Relax", e_init, slab.get_potential_energy())
 
     # ── Stage 1: Inhibitor pre-treatment ──────────────────────────────────────
     base_slabs = [slab]
     if inh_cfg.get("enabled", False) and inh_file and os.path.exists(inh_file):
-        log_stage_title(logger, "STAGE 1", f"Inhibitor discovery and verification ({inh_file})")
+        log_stage_title(logger, "STAGE 1", f"Inhibitor Discovery ({os.path.basename(inh_file)})")
         inh_mol = read(inh_file)
         inh_cands = execute_discovery_stage(
             slab,
@@ -277,34 +254,79 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             config,
             f"{out_prefix}_inh",
             logger,
-            True,
             tag=2,
             center_target=inh_cfg.get("inhibitor_center", "O"),
         )
         if inh_cands:
-            # Sort by e_final to pick most stable ones for branching
             if any("e_final" in c.info for c in inh_cands):
                 inh_cands.sort(key=lambda x: x.info.get("e_final", 1e10))
             limit = inh_cfg.get("branching_limit", 3)
             base_slabs = inh_cands[:limit]
-            logger.info(f"  Branching into top {len(base_slabs)} stable inhibited surfaces for Stage 2.")
+            logger.info(f"  Selected top {len(base_slabs)} inhibited surfaces for Stage 2.")
 
     # ── Stage 2: Main precursor discovery ─────────────────────────────────────
     if mol:
-        log_stage_title(logger, "STAGE 2", f"Main precursor discovery and verification ({mol_file})")
+        log_stage_title(logger, "STAGE 2", f"Main Precursor Discovery ({os.path.basename(mol_file)})")
         mol_center = mechs_cfg.get("chemisorption", {}).get("precursor_center", "Si")
         all_final_results = []
         for i, s in enumerate(base_slabs):
             suffix = f"_inh{i}" if len(base_slabs) > 1 else ""
             results = execute_discovery_stage(
-                s, mol, config, f"{out_prefix}{suffix}", logger, True, tag=3, center_target=mol_center
+                s, mol, config, f"{out_prefix}{suffix}", logger, tag=3, center_target=mol_center
             )
             all_final_results.extend(results)
 
         if all_final_results:
-            write(f"{out_prefix}_all_verified_final.extxyz", all_final_results)
+            write(f"{out_prefix}_final_verified.extxyz", all_final_results)
 
-    logger.info(f"--- Study Complete. Results saved with prefix '{out_prefix}'. ---")
+
+def run_generic_adsorption_study(config_path="config.yaml"):
+    import copy
+
+    config = load_config(config_path)
+    paths = config.get("paths", {})
+
+    # Detect batch mode or single mode
+    adsorbates = paths.get("adsorbate")
+    inhibitors = paths.get("inhibitor", [None])
+
+    # Standardize to lists
+    if isinstance(adsorbates, str):
+        adsorbates = [adsorbates]
+    if isinstance(inhibitors, str):
+        inhibitors = [inhibitors]
+    if not inhibitors:
+        inhibitors = [None]
+
+    global_prefix = paths.get("output_prefix", "discovery")
+
+    for inh_path in inhibitors:
+        for ads_path in adsorbates:
+            inh_name = os.path.splitext(os.path.basename(inh_path))[0] if inh_path else "none"
+            ads_name = os.path.splitext(os.path.basename(ads_path))[0] if ads_path else "none"
+
+            run_name = f"{inh_name}_on_{ads_name}"
+            run_dir = os.path.join(global_prefix, run_name)
+            os.makedirs(run_dir, exist_ok=True)
+
+            # Setup logger for this specific pair
+            log_file = os.path.join(run_dir, "workflow.log")
+            logger = setup_logger(log_path=log_file, verbose=True, mode="w")
+
+            log_stage_title(logger, "BATCH RUN", f"Pair: {inh_name} + {ads_name}")
+
+            # Create local config copy for this pair
+            run_config = copy.deepcopy(config)
+            run_config["paths"]["adsorbate"] = ads_path
+            run_config["paths"]["inhibitor"] = inh_path
+            run_config["paths"]["output_prefix"] = os.path.join(run_dir, "results")
+
+            try:
+                execute_discovery_workflow(run_config, logger)
+            except Exception as e:
+                logger.error(f"Discovery workflow failed for {run_name}: {e}")
+
+    print(f"\n--- Batch discovery complete. Results saved in '{global_prefix}/' ---")
 
 
 if __name__ == "__main__":
