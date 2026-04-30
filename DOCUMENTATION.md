@@ -53,10 +53,22 @@ Handles the creation and modification of the substrate surface.
 - **`element`**: String (e.g., `"H"`). Passivating element.
 - **`side`**: `"bottom"` (recommended) or `"top"`.
 
-### 3.4 Slab Relaxation
-- **`enabled`**: Boolean. Perform initial optimization of the clean surface.
-- **`steps`**: Integer. Maximum BFGS optimization steps.
+### 3.4 Surface Analysis
+Settings used by the engine to analyze the local environment of surface atoms.
+- **`symprec`**: Float (Å). Precision for symmetry and site equivalence detection.
+- **`ideal_coordination`**: Dictionary mapping elements to their expected bulk coordination numbers (e.g., `Si: 4`, `O: 2`). This is used to detect "dangling bonds" for passivation and active site mapping.
+
+### 3.5 Slab Relaxation
+Initial geometry optimization of the substrate.
+- **`enabled`**: Boolean. Perform optimization.
 - **`fmax`**: Float (eV/Å). Force convergence threshold.
+- **`steps`**: Integer. Max optimization steps.
+- **`frozen_z_ang`**: Float (Å). Fix atoms below this Z-height to simulate the bulk interior.
+
+### 3.6 Slab Equilibration
+Thermal pre-equilibration of the substrate using Molecular Dynamics.
+- **`enabled`**: Boolean. Perform MD on the clean slab.
+- **`frozen_z_ang`**: Float (Å). Fix bottom layers during MD.
 
 ---
 
