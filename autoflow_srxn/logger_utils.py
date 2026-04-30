@@ -7,12 +7,15 @@ def setup_logger(log_path="workflow.log", verbose=False, mode="a"):
     logger = logging.getLogger("AutoFlow-SRXN")
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
-    # Avoid duplicate handlers if setup multiple times
-    if logger.handlers:
-        return logger
+    # Clear existing handlers to allow re-configuration and avoid duplicates
+    # (e.g., if a default logger was initialized before the specific prefix-log)
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
 
     # Formatter
-    formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
 
     # File Handler
     try:
@@ -67,12 +70,13 @@ def log_results_table(logger, summary_data, title="Optimization Summary"):
     logger.info(f" {title}")
     logger.info("-" * 95)
     logger.info(
-        f"{'ID':<4} | {'Mechanism':<15} | {'E_initial (eV)':<15} | {'E_final (eV)':<15} | {'Delta (eV)':<10} | {'Note'}"
+        f"{'ID':<4} | {'Mechanism':<15} | {'E_final (eV)':<15} | {'Delta (eV)':<10} | {'E_ads (eV)':<10} | {'Note'}"
     )
-    logger.info("-" * 95)
+    logger.info("-" * 105)
     for row in summary_data:
         marker = "* (Best Pose)" if row["id"] in best_ids else ""
+        e_ads = row.get("e_ads", 0.0)
         logger.info(
-            f"{row['id']:<4} | {row['mech'][:15]:<15} | {row['e_init']:15.4f} | {row['e_final']:15.4f} | {row['delta']:10.4f} | {marker}"
+            f"{row['id']:<4} | {row['mech'][:15]:<15} | {row['e_final']:15.4f} | {row['delta']:10.4f} | {e_ads:10.4f} | {marker}"
         )
-    logger.info("=" * 95 + "\n")
+    logger.info("=" * 105 + "\n")

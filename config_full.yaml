@@ -442,6 +442,7 @@ reaction_search:
       timestep_fs:    1.0      # Timestep (fs).
       damping:        100.0    # Langevin friction (fs).
       frozen_z_ang:   4.0      # Fix bottom layers during MD (Å).
+      post_relax:     true     # Perform final relaxation after MD.
 
     # ── Selection Filter ────────────────────────────────────────────────────
     # List of specific candidate indices to process (e.g. [0, 12, 45]).
