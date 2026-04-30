@@ -282,26 +282,38 @@ def execute_discovery_workflow(config, logger):
 
 def run_generic_adsorption_study(config_path="config.yaml"):
     import copy
+    import glob
 
     config = load_config(config_path)
     paths = config.get("paths", {})
 
-    # Detect batch mode or single mode
-    adsorbates = paths.get("adsorbate")
-    inhibitors = paths.get("inhibitor", [None])
+    def get_structure_files(path_or_dir):
+        if not path_or_dir:
+            return [None]
+        if os.path.isdir(path_or_dir):
+            files = []
+            for ext in ["*.vasp", "*.xyz", "*.extxyz"]:
+                files.extend(glob.glob(os.path.join(path_or_dir, ext)))
+            return sorted(files)
+        if isinstance(path_or_dir, list):
+            return path_or_dir
+        return [path_or_dir]
 
-    # Standardize to lists
-    if isinstance(adsorbates, str):
-        adsorbates = [adsorbates]
-    if isinstance(inhibitors, str):
-        inhibitors = [inhibitors]
-    if not inhibitors:
-        inhibitors = [None]
+    # 1. Resolve adsorbates
+    ads_input = paths.get("adsorbates_dir") or paths.get("adsorbate")
+    adsorbates = get_structure_files(ads_input)
+
+    # 2. Resolve inhibitors
+    inh_input = paths.get("inhibitors_dir") or paths.get("inhibitor")
+    inhibitors = get_structure_files(inh_input)
 
     global_prefix = paths.get("output_prefix", "discovery")
 
     for inh_path in inhibitors:
         for ads_path in adsorbates:
+            if not ads_path:
+                continue
+
             inh_name = os.path.splitext(os.path.basename(inh_path))[0] if inh_path else "none"
             ads_name = os.path.splitext(os.path.basename(ads_path))[0] if ads_path else "none"
 
@@ -309,13 +321,13 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             run_dir = os.path.join(global_prefix, run_name)
             os.makedirs(run_dir, exist_ok=True)
 
-            # Setup logger for this specific pair
             log_file = os.path.join(run_dir, "workflow.log")
             logger = setup_logger(log_path=log_file, verbose=True, mode="w")
 
             log_stage_title(logger, "BATCH RUN", f"Pair: {inh_name} + {ads_name}")
+            logger.info(f"  Inhibitor: {inh_path if inh_path else 'None'}")
+            logger.info(f"  Adsorbate: {ads_path}")
 
-            # Create local config copy for this pair
             run_config = copy.deepcopy(config)
             run_config["paths"]["adsorbate"] = ads_path
             run_config["paths"]["inhibitor"] = inh_path
