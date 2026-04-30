@@ -303,9 +303,11 @@ def run_generic_adsorption_study(config_path="config.yaml"):
     ads_input = paths.get("adsorbates_dir") or paths.get("adsorbate")
     adsorbates = get_structure_files(ads_input)
 
-    # 2. Resolve inhibitors
+    # 2. Resolve inhibitors (ensure [None] if we want to skip inhibitors)
     inh_input = paths.get("inhibitors_dir") or paths.get("inhibitor")
     inhibitors = get_structure_files(inh_input)
+    if not inhibitors:  # Handle case where dir exists but is empty
+        inhibitors = [None]
 
     global_prefix = paths.get("output_prefix", "discovery")
 
@@ -314,10 +316,11 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             if not ads_path:
                 continue
 
-            inh_name = os.path.splitext(os.path.basename(inh_path))[0] if inh_path else "none"
+            inh_name = os.path.splitext(os.path.basename(inh_path))[0] if inh_path else ""
             ads_name = os.path.splitext(os.path.basename(ads_path))[0] if ads_path else "none"
 
-            run_name = f"{inh_name}_on_{ads_name}"
+            # Cleaner naming: 'precursor' instead of 'none_on_precursor'
+            run_name = f"{inh_name}_on_{ads_name}" if inh_name else ads_name
             run_dir = os.path.join(global_prefix, run_name)
             os.makedirs(run_dir, exist_ok=True)
 
