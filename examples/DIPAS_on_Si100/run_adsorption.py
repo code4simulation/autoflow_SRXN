@@ -303,10 +303,15 @@ def run_generic_adsorption_study(config_path="config.yaml"):
     ads_input = paths.get("adsorbates_dir") or paths.get("adsorbate")
     adsorbates = get_structure_files(ads_input)
 
-    # 2. Resolve inhibitors (ensure [None] if we want to skip inhibitors)
+    # 2. Resolve inhibitors
     inh_input = paths.get("inhibitors_dir") or paths.get("inhibitor")
     inhibitors = get_structure_files(inh_input)
-    if not inhibitors:  # Handle case where dir exists but is empty
+
+    # NEW: Automatically include a 'no-inhibitor' baseline if requested
+    if paths.get("include_no_inhibitor", False):
+        if None not in inhibitors:
+            inhibitors = [None] + inhibitors
+    elif not inhibitors:
         inhibitors = [None]
 
     global_prefix = paths.get("output_prefix", "discovery")
