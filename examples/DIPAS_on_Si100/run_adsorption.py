@@ -7,7 +7,7 @@ from ase.io import read, write
 
 from autoflow_srxn.ads_workflow_mgr import AdsorptionWorkflowManager
 from autoflow_srxn.chemisorption_builder import build_chemisorption_structures
-from autoflow_srxn.logger_utils import setup_logger
+from autoflow_srxn.logger_utils import log_energy_comparison, log_results_table, log_stage_title, setup_logger
 from autoflow_srxn.surface_utils import (
     create_slab_from_bulk,
     passivate_surface_coverage_general,
@@ -118,7 +118,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
     # ── Stage 0: Substrate generation & passivation ────────────────────────────
     sub_gen_cfg = sp_cfg.get("slab_generation", {})
     if sub_gen_cfg.get("enabled", False):
-        logger.info("STAGE 0: Generating substrate slab...")
+        log_stage_title(logger, "STAGE 0", "Generating substrate slab...")
         bulk_atoms = read(paths["substrate_bulk"])
         slab = create_slab_from_bulk(
             bulk_atoms=bulk_atoms,
@@ -180,12 +180,11 @@ def run_generic_adsorption_study(config_path="config.yaml"):
         write_standardized_vasp("passivated.vasp", slab)
         logger.info("Saved passivated substrate to 'passivated.vasp'.")
 
-    # [Optional Slab Relaxation]
     slab_relax_cfg = sp_cfg.get("slab_relaxation", {})
     if slab_relax_cfg.get("enabled", False):
         from autoflow_srxn.potentials import SimulationEngine
 
-        logger.info("STAGE 0.5: Performing slab relaxation...")
+        log_stage_title(logger, "STAGE 0.5", "Performing slab relaxation...")
         try:
             engine = SimulationEngine(config)
             n_steps = slab_relax_cfg.get("steps", 200)
@@ -199,9 +198,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             engine.relax(slab, fmax=fmax_val, steps=n_steps, frozen_z_ang=frozen_z, verbose=True)
 
             e_final = slab.get_potential_energy()
-            logger.info(
-                f"  [Slab Relax] E_initial: {e_init:.4f} eV, E_final: {e_final:.4f} eV, Delta: {e_final - e_init:.4f} eV"
-            )
+            log_energy_comparison(logger, "Slab Relax", e_init, e_final)
 
             write_standardized_vasp("relaxed_slab.vasp", slab)
             logger.info("Saved relaxed slab to 'relaxed_slab.vasp'.")
@@ -216,7 +213,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
         elif not os.path.exists(inh_file):
             logger.warning(f"STAGE 1: Inhibitor discovery skipped (file not found: {inh_file}).")
         else:
-            logger.info(f"STAGE 1: Inhibitor discovery ({inh_file})")
+            log_stage_title(logger, "STAGE 1", f"Inhibitor discovery ({inh_file})")
             inh_mol = read(inh_file)
             inh_center = inh_cfg.get("inhibitor_center", "O")
             inh_cands = execute_discovery_stage(
@@ -241,7 +238,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
         logger.info("STAGE 2: Main precursor discovery skipped (adsorbate is null or missing).")
         all_final_results = []
     else:
-        logger.info(f"STAGE 2: Main precursor discovery ({mol_file})")
+        log_stage_title(logger, "STAGE 2", f"Main precursor discovery ({mol_file})")
         mol_center = mechs_cfg.get("chemisorption", {}).get("precursor_center", "Si")
         all_final_results = []
         for i, s in enumerate(base_slabs):
@@ -289,7 +286,9 @@ def run_generic_adsorption_study(config_path="config.yaml"):
 
         n_total = len(all_final_results)
         n_target = len(sel_idx) if sel_idx is not None else n_total
-        logger.info(f"STAGE 3: Performing short relaxation ({n_steps} steps) on {n_target}/{n_total} candidates...")
+        log_stage_title(
+            logger, "STAGE 3", f"Performing short relaxation ({n_steps} steps) on {n_target}/{n_total} candidates..."
+        )
 
         # We rely on the engine block in config.yaml. SimulationEngine handles defaults if missing.
         if "engine" in config:
@@ -336,27 +335,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             relaxed_cands.append(atoms_relaxed)
 
         # --- Print Visual Summary Table ---
-        if summary_data:
-            # Find best (lowest e_final) for each mechanism group
-            best_by_mech = {}
-            for row in summary_data:
-                m = row["mech"]
-                if m not in best_by_mech or row["e_final"] < best_by_mech[m]["e_final"]:
-                    best_by_mech[m] = row
-
-            best_ids = {res["id"] for res in best_by_mech.values()}
-
-            logger.info("\n" + "=" * 95)
-            logger.info(
-                f"{'ID':<4} | {'Mechanism':<15} | {'E_initial (eV)':<15} | {'E_final (eV)':<15} | {'Delta (eV)':<10} | {'Note'}"
-            )
-            logger.info("-" * 95)
-            for row in summary_data:
-                marker = "* (Best Pose)" if row["id"] in best_ids else ""
-                logger.info(
-                    f"{row['id']:<4} | {row['mech'][:15]:<15} | {row['e_init']:15.4f} | {row['e_final']:15.4f} | {row['delta']:10.4f} | {marker}"
-                )
-            logger.info("=" * 95 + "\n")
+        log_results_table(logger, summary_data, title=f"Reaction Search Summary (steps={n_steps})")
 
         if relaxed_cands:
             write(f"{out_prefix}_relaxed_poses.extxyz", relaxed_cands)
