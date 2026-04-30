@@ -22,12 +22,36 @@
 # I/O — single source of truth for all file references
 # -----------------------------------------------------------------------------
 paths:
-  substrate_bulk:  "structures/SiO2_mp-546794.vasp"  # Bulk crystal (VASP). Used for slab generation.
-  substrate_slab:  null                                # Pre-built slab. When set, slab_generation is skipped.
-  adsorbate:       "structures/DIPAS.vasp"               # Precursor / adsorbate molecule.
-  inhibitor:       null                                # Inhibitor molecule for 2-step ALD workflows.
-  output_dir:      "results"                           # Base directory for all generated outputs.
-  output_prefix:   "results"                           # Prefix for output file naming.
+  # ── Substrate Definitions ─────────────────────────────────────────────────
+  substrate_bulk:  "structures/SiO2_mp-546794.vasp"  # Bulk crystal (VASP).
+  substrate_slab:  null                              # Pre-built slab (skips generation).
+
+  # ── Batch Discovery & Screening ──────────────────────────────────────────
+  # AutoFlow-SRXN supports automated large-scale screening by scanning 
+  # directories for molecular structures.
+  #
+  # 1. Directory Scanning: If adsorbates_dir/inhibitors_dir are set, all 
+  #    .vasp, .xyz, and .extxyz files within them are automatically detected.
+  # 2. Cross-Product Pairing: The tool performs discovery for ALL possible 
+  #    combinations (Precursor X Inhibitor). e.g., 2 precursors and 3 
+  #    inhibitors will result in 6 independent workflow runs.
+  # 3. Directory Organization: Each pair gets its own output folder named 
+  #    '{inhibitor}_on_{precursor}' inside the global output directory.
+  # 4. Baseline Comparison: Set 'include_no_inhibitor: true' to automatically 
+  #    include a 'Pure Surface' (no inhibitor) case for each precursor.
+
+  adsorbates_dir:  "inputs/precursors"  # Path to dir for automated scanning.
+  inhibitors_dir:  "inputs/inhibitors"  # Path to dir for automated scanning.
+  include_no_inhibitor: true            # Include 'None_on_Precursor' baseline.
+
+  # ── Individual File Options (Fallback/Legacy) ─────────────────────────────
+  # Used if directory scanning is not active or for single-target runs.
+  adsorbate:       "structures/DIPAS.vasp"
+  inhibitor:       null
+
+  # ── Output Management ─────────────────────────────────────────────────────
+  output_dir:      "results"            # Base folder for batch results.
+  output_prefix:   "discovery"          # Prefix for inner result files.
 
 
 # -----------------------------------------------------------------------------
@@ -408,10 +432,10 @@ reaction_search:
       steps:   50      # Max optimization steps.
       verbose: false
 
-    # ── Molecular Dynamics Sampling ─────────────────────────────────────────
+    # ── Thermal Equilibration (MD) ──────────────────────────────────────────
     # Useful for checking the thermal stability of physisorption poses or 
     # discovering spontaneous reaction pathways at elevated temperatures.
-    md_sampling:
+    equilibration:
       enabled:        false
       temperature_K:  300      # Simulation temperature (K).
       md_steps:       1000     # Integration steps.
