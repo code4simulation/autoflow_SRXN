@@ -408,6 +408,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
         inhibitors = [None]
 
     global_prefix = paths.get("output_prefix", "discovery")
+    restart_mode = config.get("restart", False)
 
     # ── E_ads Optimization: Pre-calculate Reference Energies ───────────────────
     # We calculate Gas Energies once for all unique molecules to avoid redundancy.
@@ -440,9 +441,15 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             inh_name = os.path.splitext(os.path.basename(inh_path))[0] if inh_path else ""
             ads_name = os.path.splitext(os.path.basename(ads_path))[0] if ads_path else "none"
 
-            # Cleaner naming: 'precursor' instead of 'none_on_precursor'
             run_name = f"{inh_name}_on_{ads_name}" if inh_name else ads_name
             run_dir = os.path.join(global_prefix, run_name)
+
+            # Check if this run is already completed
+            final_xyz = os.path.join(run_dir, "results_final_verified.extxyz")
+            if not restart_mode and os.path.exists(final_xyz):
+                print(f"  >>> Skipping {run_name} (Results already exist). Set 'restart: true' to force.")
+                continue
+
             os.makedirs(run_dir, exist_ok=True)
 
             log_file = os.path.join(run_dir, "workflow.log")
