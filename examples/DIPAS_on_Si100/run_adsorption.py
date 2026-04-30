@@ -20,8 +20,103 @@ def load_config(config_path):
         return yaml.safe_load(f)
 
 
+def execute_verification_stage(candidates, config, logger, out_prefix, tag=3):
+    """Performs Relaxation and Equilibration (MD) on candidates using ML potentials."""
+    rs_cfg = config.get("reaction_search", {})
+    verify_cfg = rs_cfg.get("verification", {})
+    run_relax = verify_cfg.get("relaxation", {}).get("enabled", False)
+    run_equil = verify_cfg.get("equilibration", {}).get("enabled", False)
+
+    if not candidates or not (run_relax or run_equil):
+        return candidates
+
+    from autoflow_srxn.potentials import SimulationEngine
+
+    sel_idx = verify_cfg.get("selected_indices", None)
+    if isinstance(sel_idx, str):
+        try:
+            import numpy as np
+
+            allowed_names = {"range": range, "list": list, "np": np, "numpy": np, "abs": abs}
+            sel_idx = eval(sel_idx, {"__builtins__": {}}, allowed_names)
+            if hasattr(sel_idx, "tolist"):
+                sel_idx = sel_idx.tolist()
+            elif not isinstance(sel_idx, list):
+                sel_idx = list(sel_idx)
+        except Exception as e:
+            logger.error(f"  [Verification] Failed to evaluate 'selected_indices' expression: {e}")
+            sel_idx = None
+
+    n_total = len(candidates)
+    n_target = len(sel_idx) if sel_idx is not None else n_total
+    log_stage_title(
+        logger,
+        "VERIFICATION",
+        f"Processing {n_target}/{n_total} sites (Relax={run_relax}, Equil={run_equil})",
+    )
+
+    engine = SimulationEngine(config)
+    calc = engine.get_calculator()
+
+    processed_cands = []
+    summary_data = []
+
+    for i, atoms in enumerate(candidates):
+        if sel_idx is not None and i not in sel_idx:
+            continue
+
+        atoms_proc = atoms.copy()
+        atoms_proc.info = atoms.info.copy()
+        atoms_proc.calc = calc
+
+        try:
+            e_init = atoms_proc.get_potential_energy()
+
+            if run_relax:
+                r_cfg = verify_cfg.get("relaxation", {})
+                engine.relax(
+                    atoms_proc,
+                    steps=r_cfg.get("steps", 50),
+                    fmax=r_cfg.get("fmax", 0.05),
+                    verbose=r_cfg.get("verbose", False),
+                )
+
+            if run_equil:
+                e_cfg = verify_cfg.get("equilibration", {})
+                engine.run_md(
+                    atoms_proc,
+                    temp_K=e_cfg.get("temperature_K", 300),
+                    md_steps=e_cfg.get("md_steps", 1000),
+                    timestep_fs=e_cfg.get("timestep_fs", 1.0),
+                    damping=e_cfg.get("damping", 100.0),
+                    frozen_z_ang=e_cfg.get("frozen_z_ang"),
+                )
+
+            e_final = atoms_proc.get_potential_energy()
+            delta_e = e_final - e_init
+            mech = atoms.info.get("mechanism", "unknown")
+
+            summary_data.append({"id": i, "mech": mech, "e_init": e_init, "e_final": e_final, "delta": delta_e})
+
+            atoms_proc.info["e_initial"] = e_init
+            atoms_proc.info["e_final"] = e_final
+            atoms_proc.info["verification"] = f"relax={run_relax}_equil={run_equil}"
+        except Exception as e:
+            logger.warning(f"  [Verification] Candidate {i} failed: {e}")
+            atoms_proc.info["verification"] = "failed"
+
+        processed_cands.append(atoms_proc)
+
+    log_results_table(logger, summary_data, title=f"Verification Summary (tag={tag})")
+
+    if processed_cands:
+        write(f"{out_prefix}_verified_poses.extxyz", processed_cands)
+
+    return processed_cands
+
+
 def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True, tag=2, center_target="Si"):
-    """Geometry-only candidate generation for physisorption and chemisorption."""
+    """Orchestrates candidate generation and subsequent verification."""
     rs_cfg = config.get("reaction_search", {})
     mechs_cfg = rs_cfg.get("mechanisms", {})
     physi_cfg = mechs_cfg.get("physisorption", {})
@@ -32,20 +127,6 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True,
     run_chem = chem_cfg.get("enabled", True)
 
     mgr = AdsorptionWorkflowManager(slab, config=config, symprec=symprec, verbose=verbose)
-
-    # Lateral span diagnostic
-    d_mol = mgr.calculate_molecule_lateral_extent(mol)
-    a_len = np.linalg.norm(slab.cell[0])
-    b_len = np.linalg.norm(slab.cell[1])
-    logger.info(
-        f"  DIAGNOSTIC: {mol.get_chemical_formula()} span = {d_mol:.2f} A | Substrate = {a_len:.2f} x {b_len:.2f} A"
-    )
-    if a_len < d_mol + 3.0 or b_len < d_mol + 3.0:
-        logger.warning(
-            f"  PBC CONFLICT: cell ({a_len:.1f}x{b_len:.1f}) may be too small "
-            f"for {mol.get_chemical_formula()} (span={d_mol:.1f} A)."
-        )
-
     all_cands = []
 
     if run_phy:
@@ -84,7 +165,9 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, verbose=True,
     if all_cands:
         write(f"{out_prefix}_all_poses.extxyz", all_cands)
 
-    return all_cands
+    # NEW: Automated Verification (Relax + Equil) integrated into the stage
+    verified_cands = execute_verification_stage(all_cands, config, logger, out_prefix, tag=tag)
+    return verified_cands
 
 
 def run_generic_adsorption_study(config_path="config.yaml"):
@@ -95,26 +178,20 @@ def run_generic_adsorption_study(config_path="config.yaml"):
     mechs_cfg = rs_cfg.get("mechanisms", {})
     inh_cfg = mechs_cfg.get("inhibition", {})
 
-    out_prefix = paths.get("output_prefix")
-    log_file = f"{out_prefix}_workflow.log" if out_prefix else "workflow.log"
-
     logger = setup_logger(
-        log_path=log_file,
+        log_path=paths.get("output_prefix", "results") + "_workflow.log",
         verbose=True,
-        mode="w",  # Overwrite logs for clarity
+        mode="w",
     )
-    logger.info(f"--- Starting AutoFlow-SRXN Discovery Study ({config_path}) ---")
+    log_stage_title(logger, "AutoFlow-SRXN", f"Starting Discovery Study ({config_path})")
 
     mol_file = paths.get("adsorbate")
     inh_file = paths.get("inhibitor")
     out_prefix = paths.get("output_prefix", "cands_out")
 
     mol = None
-    if mol_file:
-        if os.path.exists(mol_file):
-            mol = read(mol_file)
-        else:
-            logger.warning(f"Adsorbate file not found: {mol_file}")
+    if mol_file and os.path.exists(mol_file):
+        mol = read(mol_file)
 
     slab = None
 
@@ -135,39 +212,25 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             verbose=True,
         )
         write_standardized_vasp("generated_substrate.vasp", slab)
-        logger.info("Saved generated raw substrate to 'generated_substrate.vasp'.")
 
-        # [Optional Reconstruction]
         recon_cfg = sub_gen_cfg.get("reconstruction", {})
         if recon_cfg.get("enabled", False):
             from autoflow_srxn.surface_utils import apply_surface_reconstruction
 
             strategy = recon_cfg.get("strategy", "auto")
             side = recon_cfg.get("side", "top")
-            logger.info(f"Applying surface reconstruction strategy: {strategy} on {side}...")
-
-            # Extract hyperparameters for fine-tuning
             recon_params = {
                 "buckling_dist": recon_cfg.get("buckling_dist", 0.4),
                 "dimer_dist": recon_cfg.get("dimer_dist", 0.6),
                 "amplitude": recon_cfg.get("amplitude", 0.1),
             }
-
             slab = apply_surface_reconstruction(slab, strategy=strategy, side=side, verbose=True, **recon_params)
             write_standardized_vasp("reconstructed_substrate.vasp", slab)
-            logger.info("Saved reconstructed substrate to 'reconstructed_substrate.vasp'.")
     else:
-        slab_path = paths.get("substrate_slab")
-        if not slab_path:
-            raise ValueError(
-                "Either surface_prep.slab_generation.enabled must be true "
-                "or paths.substrate_slab must point to a pre-built slab."
-            )
-        slab = read(slab_path)
+        slab = read(paths["substrate_slab"])
 
     pass_cfg = sp_cfg.get("passivation", {})
     if pass_cfg.get("enabled", False):
-        logger.info("Applying geometric passivation...")
         ideal_coord = sp_cfg.get("surface_analysis", {}).get("ideal_coordination", {})
         side = pass_cfg.get("side", "bottom")
         sides = [side] if side != "both" else ["top", "bottom"]
@@ -181,7 +244,6 @@ def run_generic_adsorption_study(config_path="config.yaml"):
                 verbose=True,
             )
         write_standardized_vasp("passivated.vasp", slab)
-        logger.info("Saved passivated substrate to 'passivated.vasp'.")
 
     slab_relax_cfg = sp_cfg.get("slab_relaxation", {})
     if slab_relax_cfg.get("enabled", False):
@@ -190,173 +252,59 @@ def run_generic_adsorption_study(config_path="config.yaml"):
         log_stage_title(logger, "STAGE 0.5", "Performing slab relaxation...")
         try:
             engine = SimulationEngine(config)
-            n_steps = slab_relax_cfg.get("steps", 200)
-            fmax_val = slab_relax_cfg.get("fmax", 0.05)
-            frozen_z = slab_relax_cfg.get("frozen_z_ang")
-
-            # Calculate initial energy
             slab.calc = engine.get_calculator()
             e_init = slab.get_potential_energy()
-
-            engine.relax(slab, fmax=fmax_val, steps=n_steps, frozen_z_ang=frozen_z, verbose=True)
-
-            e_final = slab.get_potential_energy()
-            log_energy_comparison(logger, "Slab Relax", e_init, e_final)
-
+            engine.relax(
+                slab,
+                fmax=slab_relax_cfg.get("fmax", 0.05),
+                steps=slab_relax_cfg.get("steps", 200),
+                frozen_z_ang=slab_relax_cfg.get("frozen_z_ang"),
+                verbose=True,
+            )
+            log_energy_comparison(logger, "Slab Relax", e_init, slab.get_potential_energy())
             write_standardized_vasp("relaxed_slab.vasp", slab)
-            logger.info("Saved relaxed slab to 'relaxed_slab.vasp'.")
         except Exception as e:
             logger.error(f"Slab relaxation failed: {e}")
 
-    # ── Stage 1: Inhibitor pre-treatment (optional branching) ─────────────────
+    # ── Stage 1: Inhibitor pre-treatment ──────────────────────────────────────
     base_slabs = [slab]
-    if inh_cfg.get("enabled", False):
-        if not inh_file:
-            logger.info("STAGE 1: Inhibitor discovery skipped (inhibitor path is null).")
-        elif not os.path.exists(inh_file):
-            logger.warning(f"STAGE 1: Inhibitor discovery skipped (file not found: {inh_file}).")
-        else:
-            log_stage_title(logger, "STAGE 1", f"Inhibitor discovery ({inh_file})")
-            inh_mol = read(inh_file)
-            inh_center = inh_cfg.get("inhibitor_center", "O")
-            inh_cands = execute_discovery_stage(
-                slab,
-                inh_mol,
-                config,
-                f"{out_prefix}_inh",
-                logger,
-                True,
-                tag=2,
-                center_target=inh_center,
-            )
-            limit = inh_cfg.get("branching_limit", 5)
-            if inh_cands:
-                base_slabs = inh_cands[:limit]
-                logger.info(f"  Branching into {len(base_slabs)} inhibited geometries for Stage 2.")
-            else:
-                logger.info("  No inhibitor candidates found. Proceeding with clean slab.")
+    if inh_cfg.get("enabled", False) and inh_file and os.path.exists(inh_file):
+        log_stage_title(logger, "STAGE 1", f"Inhibitor discovery and verification ({inh_file})")
+        inh_mol = read(inh_file)
+        inh_cands = execute_discovery_stage(
+            slab,
+            inh_mol,
+            config,
+            f"{out_prefix}_inh",
+            logger,
+            True,
+            tag=2,
+            center_target=inh_cfg.get("inhibitor_center", "O"),
+        )
+        if inh_cands:
+            # Sort by e_final to pick most stable ones for branching
+            if any("e_final" in c.info for c in inh_cands):
+                inh_cands.sort(key=lambda x: x.info.get("e_final", 1e10))
+            limit = inh_cfg.get("branching_limit", 3)
+            base_slabs = inh_cands[:limit]
+            logger.info(f"  Branching into top {len(base_slabs)} stable inhibited surfaces for Stage 2.")
 
     # ── Stage 2: Main precursor discovery ─────────────────────────────────────
-    if not mol:
-        logger.info("STAGE 2: Main precursor discovery skipped (adsorbate is null or missing).")
-        all_final_results = []
-    else:
-        log_stage_title(logger, "STAGE 2", f"Main precursor discovery ({mol_file})")
+    if mol:
+        log_stage_title(logger, "STAGE 2", f"Main precursor discovery and verification ({mol_file})")
         mol_center = mechs_cfg.get("chemisorption", {}).get("precursor_center", "Si")
         all_final_results = []
         for i, s in enumerate(base_slabs):
             suffix = f"_inh{i}" if len(base_slabs) > 1 else ""
             results = execute_discovery_stage(
-                s,
-                mol,
-                config,
-                f"{out_prefix}{suffix}",
-                logger,
-                True,
-                tag=3,
-                center_target=mol_center,
+                s, mol, config, f"{out_prefix}{suffix}", logger, True, tag=3, center_target=mol_center
             )
             all_final_results.extend(results)
 
-    # ── Stage 3: Verification (Relaxation & MD Sampling) ──────────────────────
-    verify_cfg = rs_cfg.get("verification", {})
-    run_relax = verify_cfg.get("relaxation", {}).get("enabled", False)
-    run_md = verify_cfg.get("md_sampling", {}).get("enabled", False)
+        if all_final_results:
+            write(f"{out_prefix}_all_verified_final.extxyz", all_final_results)
 
-    if all_final_results and (run_relax or run_md):
-        from autoflow_srxn.potentials import SimulationEngine
-
-        sel_idx = verify_cfg.get("selected_indices", None)
-
-        # Support dynamic evaluation of list expressions or numpy arrays
-        if isinstance(sel_idx, str):
-            try:
-                import numpy as np
-
-                # Provide a safe namespace with common utilities
-                allowed_names = {"range": range, "list": list, "np": np, "numpy": np, "abs": abs}
-                # Evaluate string expression safely
-                sel_idx = eval(sel_idx, {"__builtins__": {}}, allowed_names)
-                # Convert to list if it's a numpy array or range object
-                if hasattr(sel_idx, "tolist"):
-                    sel_idx = sel_idx.tolist()
-                elif not isinstance(sel_idx, list):
-                    sel_idx = list(sel_idx)
-                logger.info(f"  [Verification] Evaluated selected_indices: {len(sel_idx)} sites selected.")
-            except Exception as e:
-                logger.error(f"  [Verification] Failed to evaluate 'selected_indices' expression '{sel_idx}': {e}")
-                sel_idx = None
-
-        n_total = len(all_final_results)
-        n_target = len(sel_idx) if sel_idx is not None else n_total
-        log_stage_title(
-            logger,
-            "STAGE 3",
-            f"Performing verification (Relax={run_relax}, MD={run_md}) on {n_target}/{n_total} sites.",
-        )
-
-        engine = SimulationEngine(config)
-        calc = engine.get_calculator()
-
-        processed_cands = []
-        summary_data = []
-
-        for i, atoms in enumerate(all_final_results):
-            if sel_idx is not None and i not in sel_idx:
-                continue
-
-            atoms_proc = atoms.copy()
-            atoms_proc.info = atoms.info.copy()
-            atoms_proc.calc = calc
-
-            try:
-                e_init = atoms_proc.get_potential_energy()
-
-                # --- 1. Relaxation ---
-                if run_relax:
-                    r_cfg = verify_cfg.get("relaxation", {})
-                    engine.relax(
-                        atoms_proc,
-                        steps=r_cfg.get("steps", 50),
-                        fmax=r_cfg.get("fmax", 0.05),
-                        verbose=r_cfg.get("verbose", False),
-                    )
-
-                # --- 2. MD Sampling ---
-                if run_md:
-                    m_cfg = verify_cfg.get("md_sampling", {})
-                    engine.run_md(
-                        atoms_proc,
-                        temp_K=m_cfg.get("temperature_K", 300),
-                        md_steps=m_cfg.get("md_steps", 1000),
-                        timestep_fs=m_cfg.get("timestep_fs", 1.0),
-                        damping=m_cfg.get("damping", 100.0),
-                        frozen_z_ang=m_cfg.get("frozen_z_ang"),
-                    )
-
-                e_final = atoms_proc.get_potential_energy()
-                delta_e = e_final - e_init
-                mech = atoms.info.get("mechanism", "unknown")
-
-                summary_data.append({"id": i, "mech": mech, "e_init": e_init, "e_final": e_final, "delta": delta_e})
-
-                atoms_proc.info["e_initial"] = e_init
-                atoms_proc.info["e_final"] = e_final
-                atoms_proc.info["verification"] = f"relax={run_relax}_md={run_md}"
-            except Exception as e:
-                logger.warning(f"Candidate {i} verification failed: {e}")
-                atoms_proc.info["verification"] = "failed"
-
-            processed_cands.append(atoms_proc)
-
-        # --- Print Visual Summary Table ---
-        log_results_table(logger, summary_data, title="Candidate Verification Summary")
-
-        if processed_cands:
-            write(f"{out_prefix}_verified_poses.extxyz", processed_cands)
-            logger.info(f"Saved verified candidates to '{out_prefix}_verified_poses.extxyz'.")
-
-    logger.info(f"--- Study Complete. Total unique candidates: {len(all_final_results)} ---")
+    logger.info(f"--- Study Complete. Results saved with prefix '{out_prefix}'. ---")
 
 
 if __name__ == "__main__":
