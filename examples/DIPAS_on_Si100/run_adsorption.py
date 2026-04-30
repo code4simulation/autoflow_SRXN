@@ -180,7 +180,7 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3, e_
     log_to_csv(csv_path, csv_rows)
 
     if processed_cands:
-        write(f"{out_prefix}_verified_poses.extxyz", processed_cands)
+        write(f"{out_prefix}_relaxed.extxyz", processed_cands)
 
     return processed_cands
 
@@ -229,7 +229,7 @@ def execute_discovery_stage(slab, mol, config, out_prefix, logger, tag=2, center
         all_cands.extend(chem_cands)
 
     if all_cands:
-        write(f"{out_prefix}_all_poses.extxyz", all_cands)
+        write(f"{out_prefix}_candidates.extxyz", all_cands)
 
     # Automated Verification (Relax + Equil + Post-Relax) using pre-calculated energies
     verified_cands = execute_verification_stage(
@@ -248,7 +248,7 @@ def execute_discovery_workflow(config, logger, gas_energy_map=None, slab_base_en
 
     mol_file = paths.get("adsorbate")
     inh_file = paths.get("inhibitor")
-    out_prefix = paths.get("output_prefix", "results")
+    out_prefix = paths.get("output_prefix", "structures")
 
     mol = read(mol_file) if mol_file and os.path.exists(mol_file) else None
     slab = None
@@ -370,7 +370,7 @@ def execute_discovery_workflow(config, logger, gas_energy_map=None, slab_base_en
             all_final_results.extend(results)
 
         if all_final_results:
-            write(f"{out_prefix}_final_verified.extxyz", all_final_results)
+            write(f"{out_prefix}_final.extxyz", all_final_results)
 
 
 def run_generic_adsorption_study(config_path="config.yaml"):
@@ -445,7 +445,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             run_dir = os.path.join(global_prefix, run_name)
 
             # Check if this run is already completed
-            final_xyz = os.path.join(run_dir, "results_final_verified.extxyz")
+            final_xyz = os.path.join(run_dir, "structures_final.extxyz")
             if not restart_mode and os.path.exists(final_xyz):
                 print(f"  >>> Skipping {run_name} (Results already exist). Set 'restart: true' to force.")
                 continue
@@ -462,7 +462,7 @@ def run_generic_adsorption_study(config_path="config.yaml"):
             run_config = copy.deepcopy(config)
             run_config["paths"]["adsorbate"] = ads_path
             run_config["paths"]["inhibitor"] = inh_path
-            run_config["paths"]["output_prefix"] = os.path.join(run_dir, "results")
+            run_config["paths"]["output_prefix"] = os.path.join(run_dir, "structures")
 
             try:
                 execute_discovery_workflow(
