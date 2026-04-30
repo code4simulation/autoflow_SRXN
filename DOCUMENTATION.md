@@ -145,5 +145,6 @@ Repulsive potential at very short distances to prevent non-physical atom overlap
 ## 7. Output Files
 - **`workflow.log`**: Detailed execution trace.
 - **`energylog.csv`**: Tabulated energy data for all verified candidates.
-- **`results_all_poses.extxyz`**: All generated initial candidates.
-- **`results_final_verified.extxyz`**: Verified stable structures with energy metadata.
+- **`structures_candidates.extxyz`**: All generated initial candidates.
+- **`structures_relaxed.extxyz`**: Structures after relaxation/MD verification.
+- **`structures_final.extxyz`**: Final verified stable structures with energy metadata.
