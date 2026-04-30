@@ -38,6 +38,22 @@ def calculate_gas_energy(mol, config, logger):
         return 0.0
 
 
+def log_to_csv(csv_path, summary_data):
+    """Appends verification results to a CSV file."""
+    import csv
+
+    if not summary_data:
+        return
+    file_exists = os.path.isfile(csv_path)
+    # Ensure all rows have consistent keys
+    keys = summary_data[0].keys()
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=keys)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerows(summary_data)
+
+
 def execute_verification_stage(candidates, config, logger, out_prefix, tag=3, e_gas=0.0, e_base=0.0):
     """Performs Relaxation, Equilibration (MD), and Optional Post-Relax on candidates.
     Also calculates and logs the adsorption energy (E_ads).
@@ -46,6 +62,7 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3, e_
     verify_cfg = rs_cfg.get("verification", {})
     run_relax = verify_cfg.get("relaxation", {}).get("enabled", False)
     run_equil = verify_cfg.get("equilibration", {}).get("enabled", False)
+    run_post = verify_cfg.get("equilibration", {}).get("post_relax", True) if run_equil else False
 
     if not candidates or not (run_relax or run_equil):
         return candidates
@@ -80,6 +97,7 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3, e_
 
     processed_cands = []
     summary_data = []
+    csv_rows = []
 
     for i, atoms in enumerate(candidates):
         if sel_idx is not None and i not in sel_idx:
@@ -115,16 +133,30 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3, e_
                 )
 
                 # --- 3. Post-Equilibration Relaxation ---
-                if e_cfg.get("post_relax", True):
+                if run_post:
                     engine.relax(atoms_proc, steps=50, fmax=0.05, verbose=False)
 
             e_final = atoms_proc.get_potential_energy()
-            # E_ads = E_total - (E_gas + E_base)
             e_ads = e_final - (e_gas + e_base)
             mech = atoms.info.get("mechanism", "unknown")
 
             summary_data.append(
                 {"id": i, "mech": mech, "e_init": e_init, "e_final": e_final, "delta": e_final - e_init, "e_ads": e_ads}
+            )
+
+            csv_rows.append(
+                {
+                    "tag": tag,
+                    "id": i,
+                    "mechanism": mech,
+                    "e_init": f"{e_init:.6f}",
+                    "e_final": f"{e_final:.6f}",
+                    "e_ads": f"{e_ads:.6f}",
+                    "relax": run_relax,
+                    "equil": run_equil,
+                    "post_relax": run_post,
+                    "out_prefix": out_prefix,
+                }
             )
 
             atoms_proc.info["e_initial"] = e_init
@@ -138,6 +170,10 @@ def execute_verification_stage(candidates, config, logger, out_prefix, tag=3, e_
         processed_cands.append(atoms_proc)
 
     log_results_table(logger, summary_data, title=f"Verification Summary (tag={tag})")
+
+    # Save to CSV for persistent logging
+    csv_path = os.path.join(os.path.dirname(out_prefix), "energylog.csv")
+    log_to_csv(csv_path, csv_rows)
 
     if processed_cands:
         write(f"{out_prefix}_verified_poses.extxyz", processed_cands)
