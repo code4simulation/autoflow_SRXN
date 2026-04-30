@@ -108,19 +108,32 @@ Calculated using: $E_{ads} = E_{total} - (E_{gas} + E_{base})$
 ---
 
 ## 6. Simulation Engine (`engine`)
-Configures the machine learning interatomic potential (MLIP) backend.
+Configures the interatomic potential backend and hardware settings.
 
-| Parameter | Options | Description |
+### 6.1 Common Parameters
+| Parameter | Default | Description |
 | :--- | :--- | :--- |
-| `backend` | `"mace"`, `"sevennet"`, `"emt"` | Selection of the MLIP framework. |
-| `model` | `"small"`, `"medium"`, `"large"` | Pretrained model size/version. |
-| `device` | `"cpu"`, `"cuda"` | Compute device (PyTorch). |
-| `dtype` | `"float32"`, `"float64"` | Precision (float64 is recommended for optimization). |
+| `backend` | `"mace"` | Selection of the potential: `"mace"`, `"sevennet"`, or `"emt"`. |
+| `device` | `"cpu"` | Compute device: `"cpu"` or `"cuda"`. |
+| `dtype` | `"float64"` | Numerical precision: `"float32"` or `"float64"` (Recommended). |
 
-### 6.1 ZBL Correction
-Repulsive potential at very short distances to prevent non-physical atom overlaps during MD.
-- **`cutoff_inner`**: Range where ZBL is fully active.
-- **`cutoff_outer`**: Range where ZBL is completely switched off.
+### 6.2 MACE Specifics
+- **`model`**: `"small"`, `"medium"`, or `"large"`. Refers to the MACE-MP foundation model size.
+- **`d3`**: Boolean. Enable/disable Grimme's D3 dispersion correction.
+
+### 6.3 SevenNet Specifics
+- **`model`**: Path to a `.pth` checkpoint or a predefined name (e.g., `"7net-0"`).
+- **`enable_flash`**: Boolean. Enables FlashAttention-2 (GPU only) to reduce memory usage.
+- **`enable_cueq`**: Boolean. Enables cuEquivariance acceleration (GPU only).
+
+### 6.4 EMT (Effective Medium Theory)
+- No additional parameters. Use exclusively for rapid workflow testing on simple metals and light elements.
+
+### 6.5 ZBL Short-Range Repulsion
+Repulsive potential at very short distances to prevent non-physical atom overlaps during MD or aggressive relaxation.
+- **`enabled`**: Boolean. Enable ZBL mixing.
+- **`cutoff_inner`**: Float (Å). Distance below which ZBL is fully active.
+- **`cutoff_outer`**: Float (Å). Global fallback distance above which ZBL is inactive.
 
 ---
 
